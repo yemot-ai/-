@@ -4,7 +4,7 @@ on:
   push:
     branches: ["main"]
     paths:
-      - 'CUTLAB_STUDIO_SOURCE.zip.b64'
+      - '.source_parts/part-06.b64'
   workflow_dispatch:
 
 permissions:
@@ -20,7 +20,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Restore source bundle
         run: |
-          base64 --decode CUTLAB_STUDIO_SOURCE.zip.b64 > CUTLAB_STUDIO_SOURCE.zip
+          cat .source_parts/part-*.b64 > /tmp/cutlab-source.b64
+          base64 --decode /tmp/cutlab-source.b64 > CUTLAB_STUDIO_SOURCE.zip
           unzip -o CUTLAB_STUDIO_SOURCE.zip -d .
       - name: Set up JDK 17
         uses: actions/setup-java@v4
