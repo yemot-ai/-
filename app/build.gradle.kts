@@ -45,3 +45,15 @@ dependencies {
     implementation("androidx.media3:media3-transformer:1.5.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+
+
+// Copy the offline editor files from the source bundle into Android assets.
+tasks.register<Copy>("syncEditorAssets") {
+    from(rootProject.projectDir) {
+        include("index.html", "app.css", "app.js", "manifest.webmanifest")
+    }
+    into(layout.projectDirectory.dir("src/main/assets"))
+}
+tasks.named("preBuild") {
+    dependsOn("syncEditorAssets")
+}
