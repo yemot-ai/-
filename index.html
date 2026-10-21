@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover"><meta name="theme-color" content="#101116"><meta name="description" content="CUTLAB — עורך וידאו מתקדם שעובד גם במצב לא מקוון"><title>CUTLAB Studio — עורך וידאו</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="app-shell">
+<header class="topbar">
+  <div class="brand"><div class="brand-mark">C</div><div><strong>CUTLAB</strong><span>STUDIO · עורך וידאו</span></div></div>
+  <div class="project-name"><span class="live-dot"></span><span id="projectLabel">פרויקט חדש</span><span class="saved-label" id="saveLabel">נשמר מקומית</span></div>
+  <div class="top-actions"><button class="btn ghost" id="openProjectBtn" title="פתיחת פרויקט">פתיחת פרויקט</button><button class="btn ghost" id="saveProjectBtn" title="ייצוא פרויקט עם המדיה">ייצוא פרויקט</button><button class="btn primary" id="exportBtn"><span>↓</span> ייצוא וידאו</button></div>
+</header>
+<main class="workspace">
+  <aside class="rail" aria-label="כלים">
+    <button class="rail-btn active" data-panel="media"><span>▧</span><small>מדיה</small></button>
+    <button class="rail-btn" data-panel="text"><span>T</span><small>טקסט</small></button>
+    <button class="rail-btn" data-panel="filters"><span>◐</span><small>פילטרים</small></button>
+    <button class="rail-btn" data-panel="audio"><span>♫</span><small>שמע</small></button>
+    <button class="rail-btn" data-panel="adjust"><span>◒</span><small>התאמות</small></button>
+  </aside>
+  <aside class="tools-panel">
+    <section class="tool-section active" id="panel-media">
+      <div class="panel-heading"><div><p class="eyebrow">הספרייה שלך</p><h2>מדיה</h2></div><span class="counter" id="mediaCount">0</span></div>
+      <button class="import-drop" id="importDrop"><span class="upload-icon">↑</span><strong>ייבוא קבצים</strong><span>וידאו, תמונות ושמע</span><small>הקבצים נשארים במכשיר שלך</small></button>
+      <input id="fileInput" type="file" accept="video/*,image/*,audio/*" multiple hidden>
+      <div class="mini-toolbar"><span>הקבצים שלי</span><button class="text-button" id="clearMediaBtn">נקה רשימה</button></div>
+      <div id="mediaList" class="media-list"><div class="empty-state">ייבא קבצים כדי להתחיל לערוך</div></div>
+      <div class="tip">💡 אפשר לבחור כמה סרטונים יחד. גרור קליפים בציר הזמן כדי לשנות את הסדר.</div>
+    </section>
+    <section class="tool-section" id="panel-text">
+      <div class="panel-heading"><div><p class="eyebrow">כותרות וכתוביות</p><h2>טקסט</h2></div></div>
+      <label class="field-label" for="clipText">טקסט שיופיע על הסרטון</label><textarea id="clipText" rows="3" placeholder="כתוב כאן כותרת או כתובית..."></textarea>
+      <label class="field-label" for="textStyle">סגנון כותרת</label><select id="textStyle"><option value="bold">מודגש</option><option value="outline">עם מסגרת</option><option value="box">רקע כהה</option><option value="minimal">נקי ועדין</option></select>
+      <label class="field-label" for="textPosition">מיקום</label><select id="textPosition"><option value="bottom">למטה</option><option value="center">במרכז</option><option value="top">למעלה</option></select>
+      <label class="field-label" for="textSize">גודל טקסט <output id="textSizeValue">42</output></label><input id="textSize" type="range" min="18" max="92" value="42">
+      <div class="two-fields"><button class="btn secondary" id="applyTextBtn">החל על הקליפ</button><button class="btn ghost" id="clearTextBtn">הסר טקסט</button></div>
+      <div class="tip">הטקסט מוצג בתצוגה וייכלל בייצוא הווידאו.</div>
+    </section>
+    <section class="tool-section" id="panel-filters">
+      <div class="panel-heading"><div><p class="eyebrow">מראה ואווירה</p><h2>פילטרים</h2></div></div>
+      <div class="filter-grid">
+        <button class="filter-option selected" data-filter="none"><span class="filter-preview normal">Aa</span><span>מקורי</span></button>
+        <button class="filter-option" data-filter="cinematic"><span class="filter-preview cinema">Aa</span><span>קולנועי</span></button>
+        <button class="filter-option" data-filter="mono"><span class="filter-preview mono">Aa</span><span>שחור לבן</span></button>
+        <button class="filter-option" data-filter="warm"><span class="filter-preview warm">Aa</span><span>חם</span></button>
+        <button class="filter-option" data-filter="vintage"><span class="filter-preview vintage">Aa</span><span>וינטג׳</span></button>
+        <button class="filter-option" data-filter="cool"><span class="filter-preview cool">Aa</span><span>קר</span></button>
+        <button class="filter-option" data-filter="fade"><span class="filter-preview fade">Aa</span><span>דהוי</span></button>
+        <button class="filter-option" data-filter="vivid"><span class="filter-preview vivid">Aa</span><span>חי</span></button>
+      </div>
+      <div class="tip">הפילטר נבחר עבור הקליפ המסומן. ניתן לשנות בכל עת.</div>
+    </section>
+    <section class="tool-section" id="panel-audio">
+      <div class="panel-heading"><div><p class="eyebrow">פסקול</p><h2>שמע</h2></div></div>
+      <div class="audio-card"><div class="audio-symbol">♫</div><div><strong>מוזיקת רקע</strong><p id="musicName">לא נבחר קובץ שמע</p></div></div>
+      <button class="btn secondary full" id="chooseMusicBtn">בחר קובץ שמע</button><input id="musicInput" type="file" accept="audio/*" hidden>
+      <label class="field-label" for="musicVolume">עוצמת מוזיקת רקע <output id="musicVolumeValue">35%</output></label><input id="musicVolume" type="range" min="0" max="100" value="35">
+      <label class="field-label" for="clipVolume">עוצמת הקליפ <output id="clipVolumeValue">100%</output></label><input id="clipVolume" type="range" min="0" max="100" value="100">
+      <button class="btn ghost full" id="removeMusicBtn">הסר מוזיקת רקע</button>
+      <div class="tip">השמע המקורי ומוזיקת הרקע משולבים בייצוא כאשר הדפדפן תומך בכך.</div>
+    </section>
+    <section class="tool-section" id="panel-adjust">
+      <div class="panel-heading"><div><p class="eyebrow">שליטה מדויקת</p><h2>התאמות</h2></div></div>
+      <label class="field-label" for="brightness">בהירות <output id="brightnessValue">100%</output></label><input id="brightness" type="range" min="40" max="160" value="100">
+      <label class="field-label" for="contrast">ניגודיות <output id="contrastValue">100%</output></label><input id="contrast" type="range" min="40" max="180" value="100">
+      <label class="field-label" for="saturation">רוויה <output id="saturationValue">100%</output></label><input id="saturation" type="range" min="0" max="200" value="100">
+      <div class="divider"></div><label class="field-label" for="aspectRatio">יחס מסך לייצוא</label><select id="aspectRatio"><option value="16:9">16:9 · YouTube</option><option value="9:16">9:16 · Reels / Shorts</option><option value="1:1">1:1 · ריבוע</option><option value="4:5">4:5 · פוסט</option></select>
+      <label class="field-label" for="fitMode">התאמת התמונה</label><select id="fitMode"><option value="cover">מלא את המסגרת</option><option value="contain">הצג את כל הפריים</option></select>
+      <button class="btn ghost full" id="resetAdjustBtn">אפס התאמות לקליפ</button>
+    </section>
+  </aside>
+  <section class="editor-area">
+    <div class="stage-toolbar"><div class="stage-label"><span class="rec-dot"></span><span>תצוגה מקדימה</span><span class="stage-separator">/</span><span id="previewMeta">אין קליפ נבחר</span></div><div class="stage-controls"><button class="icon-btn" id="undoBtn" title="ביטול">↶</button><button class="icon-btn" id="redoBtn" title="ביצוע מחדש">↷</button><button class="icon-btn" id="fitStageBtn" title="התאם תצוגה">⛶</button></div></div>
+    <div class="preview-zone" id="previewZone"><div class="preview-frame ratio-16-9" id="previewFrame"><video id="previewVideo" playsinline controls></video><img id="previewImage" alt="תצוגת תמונה" hidden><div class="caption-overlay bold bottom" id="captionOverlay"></div><div class="placeholder" id="placeholder"><div class="placeholder-glyph">▶</div><h2>הסיפור שלך מתחיל כאן</h2><p>ייבא סרטונים או תמונות כדי להתחיל לערוך</p><button class="btn primary" id="startImportBtn">＋ ייבוא מדיה</button></div></div></div>
+    <div class="playback-bar"><div class="transport"><button class="icon-btn" id="jumpStartBtn" title="לתחילת הקליפ">|◀</button><button class="play-btn" id="playBtn" title="נגן / השהה">▶</button><button class="icon-btn" id="jumpEndBtn" title="לסוף הקליפ">▶|</button></div><div class="timecode"><span id="currentTime">00:00.0</span><span class="time-divider">/</span><span id="durationTime">00:00.0</span></div><div class="playback-right"><label for="playbackZoom">זום ציר זמן</label><input id="playbackZoom" type="range" min="45" max="150" value="85"><button class="icon-btn" id="mutePreviewBtn" title="השתק תצוגה">♫</button></div></div>
+    <section class="timeline-panel">
+      <div class="timeline-heading"><div><h3>ציר זמן</h3><span id="timelineSummary">0 קליפים · 00:00</span></div><div class="timeline-actions"><button class="btn small ghost" id="splitBtn">✂ פצל בנקודת הניגון</button><button class="btn small ghost" id="duplicateBtn">▣ שכפל</button><button class="btn small danger-ghost" id="deleteClipBtn">⌫ מחק קליפ</button></div></div>
+      <div class="timeline-scroll" id="timelineScroll"><div class="ruler" id="ruler"><span>00:00</span></div><div class="timeline-track"><div class="track-label">וידאו</div><div class="track-content" id="videoTrack"><div class="track-empty">הקליפים שלך יופיעו כאן אחרי הייבוא</div></div></div><div class="timeline-track audio-track"><div class="track-label">שמע</div><div class="track-content" id="audioTrack"><div class="track-empty">אפשר להוסיף מוזיקת רקע מהכלים משמאל</div></div></div><div class="playhead" id="playhead"><div class="playhead-knob"></div></div></div>
+      <div class="clip-properties"><div class="properties-heading"><strong>מאפייני קליפ</strong><span id="selectedClipLabel">לא נבחר</span></div><div class="properties-grid"><div><label for="trimStart">התחלה (שניות)</label><input id="trimStart" type="number" min="0" step="0.1" value="0"></div><div><label for="trimEnd">סיום (שניות)</label><input id="trimEnd" type="number" min="0" step="0.1" value="0"></div><div><label for="clipSpeed">מהירות</label><select id="clipSpeed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="0.75">0.75×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="2">2×</option><option value="3">3×</option></select></div><div><label for="clipName">שם הקליפ</label><input id="clipName" type="text" placeholder="שם הקליפ"></div></div><div class="property-actions"><button class="btn small secondary" id="applyTrimBtn">החל חיתוך</button><span class="hint-text" id="trimHint">בחר קליפ כדי לערוך התחלה וסיום</span></div></div>
+    </section>
+  </section>
+</main>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div class="export-modal" id="exportModal" hidden><div class="export-card"><div class="export-icon">✦</div><h2 id="exportTitle">מכינים את הסרטון</h2><p id="exportMessage">מעבד את הקליפים שלך…</p><div class="progress-track"><div id="exportProgress"></div></div><div class="export-actions"><button class="btn ghost" id="cancelExportBtn">סגור</button></div></div></div>
+<input id="projectInput" type="file" accept=".cutproj,.json,application/json" hidden>
+</div>
+<script src="app.js" defer></script>
+
+</body>
+</html>
