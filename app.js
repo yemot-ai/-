@@ -1,236 +1,338 @@
-'use strict';
 (() => {
-  const $ = id => document.getElementById(id);
-  const FILTERS = {
-    none: 'none', cinematic: 'contrast(1.16) saturate(.88)', mono: 'grayscale(1)',
-    warm: 'sepia(.22) saturate(1.22)', vintage: 'sepia(.34) contrast(.88) saturate(.82)',
-    cool: 'hue-rotate(10deg) saturate(.88)', fade: 'brightness(1.12) contrast(.82) saturate(.82)',
-    vivid: 'saturate(1.45) contrast(1.08)'
+  'use strict';
+  const $ = (id) => document.getElementById(id);
+  const uid = (prefix = 'id') => `${prefix}-${Math.random().toString(36).slice(2, 8)}-${Date.now().toString(36).slice(-4)}`;
+  const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+  const deep = (v) => JSON.parse(JSON.stringify(v));
+  const fmt = (n) => { n = Math.max(0, Number(n) || 0); return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(Math.floor(n % 60)).padStart(2, '0')}.${Math.floor((n % 1) * 10)}`; };
+  const secs = (n) => Math.max(0, Number(n) || 0);
+  const state = {
+    ratio: '9:16', width: 720, height: 1280, currentTime: 0, playing: false, zoom: 64,
+    stageZoom: 100, showGrid: false, showSafe: false, muted: false, speed: 1, activePanel: 'media',
+    media: [], clips: [], texts: [], stickers: [], audios: [], selected: { type: '', id: '' },
+    nextName: 1, history: [], historyIndex: -1, total: 8, exporting: false, exportCancel: false
   };
-  const FILTER_NAMES = {none:'מקורי',cinematic:'קולנועי',mono:'שחור לבן',warm:'חם',vintage:'וינטג׳',cool:'קר',fade:'דהוי',vivid:'חי'};
-  const state = {clips:[], media:new Map(), selected:null, musicId:null, musicVolume:.35, ratio:'16:9', fit:'cover', zoom:85, brightness:1, contrast:1, saturation:1, textSize:42, textPosition:'bottom', textStyle:'bold', projectName:'פרויקט חדש'};
-  let activeUrl = '', toastTimer = null, autosaveTimer = null, dbPromise = null, undoStack = [], redoStack = [], exporting = false, cancelExport = false, activeRecorder = null, activeExportTimer = null, previewMuted = false;
+  const canvas = $('previewCanvas');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const previewFrame = $('stageFrame');
+  const stageWorkspace = $('stageWorkspace');
+  const exportCanvas = document.createElement('canvas');
+  exportCanvas.id = 'cutlab-export-canvas';
+  exportCanvas.setAttribute('aria-hidden', 'true');
+  exportCanvas.style.cssText = 'position:fixed;left:0;bottom:0;width:2px;height:2px;opacity:0.01;pointer-events:none;z-index:-1';
+  document.body.appendChild(exportCanvas);
+  const exportCtx = exportCanvas.getContext('2d', { alpha: false });
+  let raf = 0, lastTick = 0, stageDrag = null, resizeDrag = null, exportRecorder = null, exportChunks = [], exportUrl = '', exportStart = 0, lastMediaId = '', lastTimelineClick = 0;
+  let audioContext = null, audioDestination = null, audioNodes = new Map(), exportPromise = null;
 
-  const uid = () => Math.random().toString(36).slice(2,9) + Date.now().toString(36).slice(-4);
-  const clone = obj => JSON.parse(JSON.stringify(obj));
-  const getClip = () => state.clips.find(c => c.id === state.selected) || null;
-  const getMedia = id => state.media.get(id) || null;
-  const sec = n => Math.max(0, Number(n) || 0);
-  const fmt = n => { n=Math.max(0,Number(n)||0); const m=Math.floor(n/60), s=Math.floor(n%60), d=Math.floor((n%1)*10); return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0')+'.'+d; };
-  const plainTime = n => { n=Math.max(0,Number(n)||0); return String(Math.floor(n/60)).padStart(2,'0')+':'+String(Math.floor(n%60)).padStart(2,'0'); };
-  const clipRawLength = c => Math.max(.1, (Number(c.outPoint)||0) - (Number(c.inPoint)||0));
-  const clipLength = c => clipRawLength(c) / Math.max(.25, Number(c.speed)||1);
-  const totalLength = () => state.clips.reduce((a,c)=>a+clipLength(c),0);
-  const mediaKind = file => file.type.startsWith('video/') ? 'video' : file.type.startsWith('image/') ? 'image' : file.type.startsWith('audio/') ? 'audio' : 'other';
-  const escapeHtml = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const ratioDims = { '9:16': [720, 1280], '1:1': [720, 720], '16:9': [1280, 720], '4:5': [720, 900] };
+  const TRANSITIONS = ['none','fade','slide','zoom','wipe','flash','spin','glitch'];
+  const FILTERS = {
+    none: 'none', cinema: 'contrast(1.16) saturate(.78) sepia(.08)', vivid: 'saturate(1.55) contrast(1.06)',
+    mono: 'grayscale(1) contrast(1.1)', retro: 'sepia(.32) saturate(.85) contrast(.94)', dream: 'saturate(1.28) brightness(1.08)'
+  };
+  const presetText = {
+    pop: { color:'#ffe178', color2:'#ff64a9', gradient:true, outline:true, outlineColor:'#39213e', outlineWidth:5, shadowColor:'#140923', shadowBlur:20, font:'Arial Black', size:72, background:'none', bold:true, animIn:'pop' },
+    clean: { color:'#ffffff', color2:'#a8f4e6', gradient:false, outline:false, outlineWidth:0, shadowColor:'#000000', shadowBlur:12, font:'Arial', size:53, background:'none', bold:true, animIn:'fade' },
+    neon: { color:'#7bffe8', color2:'#ff66c4', gradient:true, outline:true, outlineColor:'#1a153b', outlineWidth:2, shadowColor:'#6b3fff', shadowBlur:32, font:'Arial Black', size:56, background:'none', bold:true, animIn:'zoom' },
+    marker: { color:'#f7ff92', color2:'#f7ff92', gradient:false, outline:false, outlineWidth:0, shadowColor:'#000000', shadowBlur:0, font:'Arial Black', size:56, background:'solid', bgColor:'#252922', bold:true, animIn:'slideUp' }
+  };
 
-  function notify(message, ms=3000) { const el=$('toast'); el.textContent=message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.classList.remove('show'),ms); }
-  function setStatus(text) { $('saveLabel').textContent=text; }
-  function snapshot() { return {clips:clone(state.clips),selected:state.selected,musicId:state.musicId,musicVolume:state.musicVolume,ratio:state.ratio,fit:state.fit,brightness:state.brightness,contrast:state.contrast,saturation:state.saturation,textSize:state.textSize,textPosition:state.textPosition,textStyle:state.textStyle,projectName:state.projectName}; }
-  function pushUndo() { undoStack.push(snapshot()); if(undoStack.length>40)undoStack.shift(); redoStack=[]; updateUndoButtons(); }
-  function restoreSnapshot(s) { Object.assign(state, clone(s)); renderAll(); persistLocal(); }
-  function undo() { if(!undoStack.length)return notify('אין עוד פעולה לביטול'); redoStack.push(snapshot()); restoreSnapshot(undoStack.pop()); updateUndoButtons(); notify('הפעולה בוטלה'); }
-  function redo() { if(!redoStack.length)return notify('אין פעולה לביצוע מחדש'); undoStack.push(snapshot()); restoreSnapshot(redoStack.pop()); updateUndoButtons(); notify('הפעולה בוצעה מחדש'); }
-  function updateUndoButtons() { $('undoBtn').disabled=!undoStack.length; $('redoBtn').disabled=!redoStack.length; $('undoBtn').style.opacity=undoStack.length?1:.45; $('redoBtn').style.opacity=redoStack.length?1:.45; }
+  function notify(message, type = 'success', duration = 2800) {
+    const toast = document.createElement('div'); toast.className = `toast ${type}`; toast.textContent = message; $('toastRegion').appendChild(toast);
+    setTimeout(() => toast.remove(), duration);
+  }
+  function setStatus(message) { $('timelineStatus').textContent = message; }
+  function snapshot() {
+    return {
+      ratio: state.ratio, currentTime: state.currentTime, zoom: state.zoom, stageZoom: state.stageZoom,
+      clips: deep(state.clips), texts: deep(state.texts), stickers: deep(state.stickers), audios: state.audios.map(a => ({...a})),
+      selected: {...state.selected}, projectName: $('projectName').value
+    };
+  }
+  function restoreSnapshot(s) {
+    state.ratio = s.ratio || '9:16'; state.currentTime = s.currentTime || 0; state.zoom = s.zoom || 64;
+    state.stageZoom = s.stageZoom || 100; state.clips = deep(s.clips || []); state.texts = deep(s.texts || []);
+    state.stickers = deep(s.stickers || []); state.audios = (s.audios || []).map(a => ({...a}));
+    state.selected = s.selected ? {...s.selected} : {type:'',id:''}; $('projectName').value = s.projectName || 'פרויקט סושיאל חדש';
+    recompute(); applyRatio(); renderAll(); selectLayer(state.selected.type, state.selected.id, false);
+  }
+  function recordHistory() {
+    const s = snapshot();
+    if (state.historyIndex >= 0 && JSON.stringify(state.history[state.historyIndex]) === JSON.stringify(s)) return;
+    state.history = state.history.slice(0, state.historyIndex + 1); state.history.push(s);
+    if (state.history.length > 60) state.history.shift();
+    state.historyIndex = state.history.length - 1; updateUndoButtons();
+  }
+  function updateUndoButtons() { $('undoBtn').disabled = state.historyIndex <= 0; $('redoBtn').disabled = state.historyIndex >= state.history.length - 1; }
+  function undo() { if (state.historyIndex <= 0) return; stopPlayback(); state.historyIndex--; restoreSnapshot(state.history[state.historyIndex]); updateUndoButtons(); notify('השינוי בוטל'); }
+  function redo() { if (state.historyIndex >= state.history.length - 1) return; stopPlayback(); state.historyIndex++; restoreSnapshot(state.history[state.historyIndex]); updateUndoButtons(); notify('השינוי הוחזר'); }
+  function mediaById(id) { return state.media.find(m => m.id === id); }
+  function clipById(id) { return state.clips.find(c => c.id === id); }
+  function textById(id) { return state.texts.find(t => t.id === id); }
+  function stickerById(id) { return state.stickers.find(t => t.id === id); }
+  function audioById(id) { return state.audios.find(t => t.id === id); }
+  function selectedLayer() {
+    const {type,id} = state.selected;
+    return type === 'clip' ? clipById(id) : type === 'text' ? textById(id) : type === 'sticker' ? stickerById(id) : type === 'audio' ? audioById(id) : null;
+  }
+  function recompute() {
+    let t = 0;
+    state.clips.forEach((c, i) => { c.start = t; c.duration = Math.max(.2, Number(c.duration) || 1); c.transition = TRANSITIONS.includes(c.transition) ? c.transition : 'none'; c.transitionDuration = clamp(Number(c.transitionDuration) || .6, .1, 2); t += c.duration; });
+    state.total = Math.max(.1, t);
+    state.texts.forEach(x => { x.start = clamp(Number(x.start)||0, 0, Math.max(0, state.total-.1)); x.duration = clamp(Number(x.duration)||1, .1, Math.max(.1,state.total-x.start)); });
+    state.stickers.forEach(x => { x.start = clamp(Number(x.start)||0, 0, Math.max(0,state.total-.1)); x.duration = clamp(Number(x.duration)||1,.1,Math.max(.1,state.total-x.start)); });
+    state.audios.forEach(x => { x.start = Math.max(0,Number(x.start)||0); x.duration = Math.max(.1,Number(x.duration)||state.total); });
+    state.currentTime = clamp(state.currentTime,0,state.total);
+  }
+  function activeClipAt(t) {
+    if (!state.clips.length) return null;
+    for (let i=0; i<state.clips.length; i++) { const c=state.clips[i]; if (t >= c.start && (t < c.start+c.duration || i===state.clips.length-1 && t<=c.start+c.duration)) return c; }
+    return t < state.clips[0].start ? state.clips[0] : state.clips[state.clips.length-1];
+  }
+  function clipIndex(id) { return state.clips.findIndex(c=>c.id===id); }
+  function applyRatio() {
+    const d = ratioDims[state.ratio] || ratioDims['9:16']; state.width=d[0];state.height=d[1];
+    previewFrame.style.aspectRatio = `${d[0]}/${d[1]}`; $('ratioLabel').textContent=state.ratio;
+    $('previewResolution').textContent = `${d[0]*1.5} × ${d[1]*1.5}`;
+    $('ratioBtn').querySelector('b').textContent=state.ratio;
+    canvas.width = d[0]; canvas.height = d[1]; fitStage(); draw();
+  }
+  function fitStage() {
+    const availableW = Math.max(120, stageWorkspace.clientWidth-30), availableH = Math.max(150,stageWorkspace.clientHeight-28);
+    const ratio = state.width/state.height; let h = Math.min(availableH, availableW/ratio) * state.stageZoom/100;
+    let w = h*ratio; if(w>availableW){w=availableW;h=w/ratio;}
+    previewFrame.style.width = `${Math.max(70,w)}px`; previewFrame.style.height = `${Math.max(100,h)}px`;
+    $('zoomLabel').textContent=`${state.stageZoom}%`;
+  }
 
-  function openDb() {
-    if(!('indexedDB' in window)) return Promise.reject(new Error('IndexedDB לא זמין'));
-    if(!dbPromise) dbPromise = new Promise((resolve,reject)=>{ const req=indexedDB.open('cutlab-studio',1); req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains('projects'))db.createObjectStore('projects');}; req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error); });
-    return dbPromise;
+  function drawDemo(ctx, t, W, H, clip) {
+    const hue = clip?.demoHue ?? 0;
+    const g = ctx.createLinearGradient(W*.06,H*.05,W*.94,H*.94);
+    if(hue===1){g.addColorStop(0,'#152a4b');g.addColorStop(.48,'#6a4b8c');g.addColorStop(1,'#f27e89');}
+    else if(hue===2){g.addColorStop(0,'#153934');g.addColorStop(.5,'#226d73');g.addColorStop(1,'#a1d6bb');}
+    else {g.addColorStop(0,'#141827');g.addColorStop(.42,'#34224d');g.addColorStop(.75,'#744d93');g.addColorStop(1,'#db7197');}
+    ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+    ctx.save(); ctx.globalAlpha=.42;
+    for(let i=0;i<16;i++){const x=(Math.sin(i*12.3+t*.17)*.5+.5)*W;const y=(Math.cos(i*7.8+t*.12)*.5+.5)*H;const r=(.018+(i%4)*.009)*W;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=['#a5a5ff','#f59abd','#7ef6e4','#ffcb8f'][i%4];ctx.fill();}
+    ctx.restore();
+    ctx.save();ctx.translate(W*.51,H*.49);ctx.rotate(-.13+Math.sin(t*.3)*.035);
+    const cardW=W*.78,cardH=H*.32;ctx.shadowColor='#09080f';ctx.shadowBlur=W*.08;ctx.fillStyle='rgba(15,14,28,.58)';roundRect(ctx,-cardW/2,-cardH/2,cardW,cardH,W*.03);ctx.fill();ctx.shadowBlur=0;ctx.strokeStyle='rgba(255,255,255,.23)';ctx.lineWidth=Math.max(1,W*.002);roundRect(ctx,-cardW/2,-cardH/2,cardW,cardH,W*.03);ctx.stroke();
+    ctx.textAlign='center';ctx.direction='ltr';ctx.fillStyle='#ddd2ff';ctx.font=`800 ${W*.035}px Arial`;ctx.fillText('CUTLAB  /  CREATOR LAB',0,-cardH*.2);ctx.fillStyle='#ffffff';ctx.font=`900 ${W*.102}px Arial Black, Arial`;ctx.fillText('MAKE IT',0,cardH*.15);ctx.fillStyle='#94f4e1';ctx.fillText('UNREAL.',0,cardH*.52);ctx.restore();
+    ctx.save();ctx.fillStyle='rgba(255,255,255,.9)';ctx.font=`700 ${W*.025}px Arial`;ctx.textAlign='center';ctx.direction='ltr';ctx.fillText('YOUR NEXT SOCIAL VIDEO STARTS HERE',W/2,H*.84);ctx.fillStyle='rgba(255,255,255,.18)';ctx.fillRect(W*.13,H*.88,W*.74,H*.003);ctx.restore();
   }
-  async function idbGet(key) { const db=await openDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('projects','readonly'),r=tx.objectStore('projects').get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);}); }
-  async function idbPut(key,value) { const db=await openDb(); return new Promise((resolve,reject)=>{const tx=db.transaction('projects','readwrite');tx.objectStore('projects').put(value,key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);}); }
-  function persistLocal() {
-    clearTimeout(autosaveTimer); setStatus('שומר…');
-    autosaveTimer=setTimeout(async()=>{try{const data={snapshot:snapshot(),media:[...state.media.values()].map(m=>({id:m.id,name:m.name,type:m.type,file:m.file,duration:m.duration,kind:m.kind})),version:1};await idbPut('autosave',data);setStatus('נשמר מקומית');}catch(e){setStatus('שמירה מקומית מוגבלת');} },500);
-  }
-  async function restoreLocal() {
-    try {
-      const data=await idbGet('autosave'); if(!data||!data.snapshot)return;
-      for(const m of (data.media||[])){ if(m.file) state.media.set(m.id,{...m,url:URL.createObjectURL(m.file)}); }
-      Object.assign(state, data.snapshot); state.media=state.media; renderAll();
-      if(state.musicId && !getMedia(state.musicId)) state.musicId=null;
-      if(state.selected && !getClip()) state.selected=state.clips[0]?.id||null;
-      updatePreview(); renderTimeline(); renderMediaList(); updateMusicPanel();
-      if(state.media.size) notify('הפרויקט הקודם שוחזר מהמכשיר');
-    } catch(e) { /* private mode or disabled storage: editing still works */ }
-  }
-
-  function readDuration(file, url) {
-    return new Promise(resolve=>{
-      const kind=mediaKind(file); if(kind==='image')return resolve(5); if(kind!=='video'&&kind!=='audio')return resolve(5);
-      const el=document.createElement(kind==='video'?'video':'audio'); el.preload='metadata'; el.src=url;
-      const done=v=>{const d=Number.isFinite(el.duration)&&el.duration>0?el.duration:5;el.removeAttribute('src');try{el.load();}catch{}resolve(d);};
-      el.onloadedmetadata=done;el.onerror=()=>resolve(5);setTimeout(()=>resolve(5),9000);
-    });
-  }
-  async function registerMedia(file, idOverride=null, durationOverride=null) {
-    if(!file) return null; const id=idOverride||uid(); if(state.media.has(id))return state.media.get(id);
-    const url=URL.createObjectURL(file); const kind=mediaKind(file); const duration=durationOverride||await readDuration(file,url);
-    const media={id,name:file.name||'מדיה',type:file.type||'application/octet-stream',file,url,kind,duration,size:file.size||0}; state.media.set(id,media); return media;
-  }
-  async function addFiles(files) {
-    const chosen=Array.from(files||[]); if(!chosen.length)return;
-    const accepted=chosen.filter(f=>['video','image','audio'].includes(mediaKind(f)));
-    if(accepted.length!==chosen.length)notify('קבצים שאינם תמונה, וידאו או שמע דולגו');
-    let addedClips=0,addedAudio=0;
-    for(const file of accepted){
-      try{const media=await registerMedia(file);if(media.kind==='audio'){state.musicId=media.id;addedAudio++;}else{state.clips.push({id:uid(),mediaId:media.id,name:file.name.replace(/\.[^.]+$/,''),inPoint:0,outPoint:media.duration,duration:media.duration,filter:'none',speed:1,volume:1,text:'',textStyle:state.textStyle,textPosition:state.textPosition,textSize:state.textSize,brightness:1,contrast:1,saturation:1});state.selected=state.clips[state.clips.length-1].id;addedClips++;}}
-      catch(e){notify('לא הצלחתי לפתוח את '+file.name);}
+  function roundRect(ctx,x,y,w,h,r){r=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+r,y);ctx.arcTo(x+w,y,x+w,y+h,r);ctx.arcTo(x+w,y+h,x,y+h,r);ctx.arcTo(x,y+h,x,y,r);ctx.arcTo(x,y,x+w,y,r);ctx.closePath();}
+  function drawSource(ctx, clip, localTime, W,H, extraTransform=null) {
+    const media=mediaById(clip.mediaId); ctx.save();
+    const filterName=clip.filter||'none';
+    let f=FILTERS[filterName]||'none'; f += ` brightness(${(Number(clip.brightness)||100)/100})`;
+    if(clip.contrast) f += ` contrast(${clip.contrast/100})`; if(clip.saturation) f += ` saturate(${clip.saturation/100})`;
+    ctx.filter=f;
+    if(clip.kind==='demo'||!media){if(extraTransform){ctx.translate(W/2+(extraTransform.x||0),H/2+(extraTransform.y||0));ctx.rotate(extraTransform.rotation||0);ctx.scale(extraTransform.scale||1,extraTransform.scale||1);ctx.globalAlpha=extraTransform.alpha??1;ctx.translate(-W/2,-H/2);}drawDemo(ctx,localTime,W,H,clip);ctx.restore();return;}
+    const source = media.kind==='video' ? media.element : media.kind==='image' ? media.element : null;
+    if(source && (media.kind==='image' ? source.complete : source.readyState>=2)) {
+      const sw=source.videoWidth||source.naturalWidth||W, sh=source.videoHeight||source.naturalHeight||H;
+      const scale=clip.fit==='contain'?Math.min(W/sw,H/sh):Math.max(W/sw,H/sh); const dw=sw*scale, dh=sh*scale;
+      ctx.fillStyle=clip.fit==='contain'?'#080910':'#000';ctx.fillRect(0,0,W,H);
+      if(extraTransform){ctx.translate(W/2,H/2);ctx.translate(extraTransform.x||0,extraTransform.y||0);ctx.rotate(extraTransform.rotation||0);ctx.scale(extraTransform.scale||1,extraTransform.scale||1);ctx.globalAlpha=extraTransform.alpha??1;ctx.translate(-W/2,-H/2);}
+      ctx.drawImage(source,(W-dw)/2,(H-dh)/2,dw,dh);
+    } else {
+      ctx.filter='none';const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,'#272b4d');g.addColorStop(1,'#61385f');ctx.fillStyle=g;ctx.fillRect(0,0,W,H);ctx.fillStyle='#ffffff';ctx.font=`bold ${W*.045}px Arial`;ctx.textAlign='center';ctx.fillText('טוען מדיה…',W/2,H/2);
     }
-    renderAll(); persistLocal();
-    if(addedClips||addedAudio)notify(`נוספו ${addedClips} קליפים${addedAudio?` ו-${addedAudio} קובצי שמע`:''}`);
+    ctx.restore();
   }
-  function addMediaAsClip(mediaId) {
-    const m=getMedia(mediaId); if(!m||m.kind==='audio')return;
-    pushUndo(); state.clips.push({id:uid(),mediaId:m.id,name:m.name.replace(/\.[^.]+$/,''),inPoint:0,outPoint:m.duration,duration:m.duration,filter:'none',speed:1,volume:1,text:'',textStyle:state.textStyle,textPosition:state.textPosition,textSize:state.textSize,brightness:1,contrast:1,saturation:1});state.selected=state.clips[state.clips.length-1].id;renderAll();persistLocal();notify('הקליפ נוסף לציר הזמן');
+  function drawTransition(ctx, clip, t, W,H) {
+    const i=clipIndex(clip.id), local=t-clip.start, d=Math.min(clip.transitionDuration||.6, clip.duration*.8);
+    if(i<=0 || clip.transition==='none' || local<0 || local>d) { drawSource(ctx,clip,Math.max(0,local*(clip.speed||1)+(clip.sourceStart||0)),W,H); return; }
+    const p=clamp(local/d,0,1), prev=state.clips[i-1];
+    if(clip.transition==='fade') {
+      drawSource(ctx,prev,Math.max(0,prev.duration-(d-local)),W,H);ctx.save();ctx.globalAlpha=p;drawSource(ctx,clip,Math.max(0,local*(clip.speed||1)+(clip.sourceStart||0)),W,H);ctx.restore();
+    } else if(clip.transition==='slide') {
+      drawSource(ctx,prev,Math.max(0,prev.duration-d+local),W,H);
+      drawSource(ctx,clip,Math.max(0,local*(clip.speed||1)+(clip.sourceStart||0)),W,H,{x:(1-p)*W*(state.ratio==='16:9'?.72:1),alpha:1});
+    } else if(clip.transition==='zoom') {
+      drawSource(ctx,clip,Math.max(0,local*(clip.speed||1)+(clip.sourceStart||0)),W,H,{scale:1.25-.25*p,alpha:p});
+    } else if(clip.transition==='wipe') {
+      drawSource(ctx,prev,Math.max(0,prev.duration-d+local),W,H);ctx.save();ctx.beginPath();ctx.rect(W*(1-p),0,W*p,H);ctx.clip();drawSource(ctx,clip,Math.max(0,local*(clip.speed||1)+(clip.sourceStart||0)),W,H);ctx.restore();
+    } else if(clip.transition==='flash') {
+      drawSource(ctx,clip,Math.max(0,local*(clip.speed||1)+(clip.sourceStart||0)),W,H);ctx.save();ctx.globalAlpha=Math.max(0,1-Math.abs(p-.48)*3.2)*.72;ctx.fillStyle='#fff';ctx.fillRect(0,0,W,H);ctx.restore();
+    } else if(clip.transition==='spin') {
+      drawSource(ctx,clip,Math.max(0,local*(clip.speed||1)+(clip.sourceStart||0)),W,H,{scale:.7+.3*p,rotation:(1-p)*-.25,alpha:p});
+    } else if(clip.transition==='glitch') {
+      drawSource(ctx,clip,Math.max(0,local*(clip.speed||1)+(clip.sourceStart||0)),W,H);ctx.save();const off=Math.sin(p*35)*W*.012;ctx.globalAlpha=(1-p)*.38;ctx.globalCompositeOperation='screen';ctx.drawImage(ctx.canvas,off,0);ctx.fillStyle='#ff2679';ctx.globalAlpha=(1-p)*.15;ctx.fillRect(0,H*(.3+p*.2),W,H*.025);ctx.restore();
+    } else drawSource(ctx,clip,Math.max(0,local*(clip.speed||1)+(clip.sourceStart||0)),W,H);
   }
-  function fmtSize(n) { if(n<1024*1024)return Math.max(1,Math.round(n/1024))+' KB';return (n/(1024*1024)).toFixed(1)+' MB'; }
-  function renderMediaList() {
-    const root=$('mediaList');root.textContent='';$('mediaCount').textContent=String(state.media.size);
-    if(!state.media.size){const e=document.createElement('div');e.className='empty-state';e.textContent='ייבא קבצים כדי להתחיל לערוך';root.append(e);return;}
-    for(const m of state.media.values()){
-      const card=document.createElement('div');card.className='media-card';
-      const thumb=document.createElement('div');thumb.className='media-thumb';
-      if(m.kind==='image'){const img=document.createElement('img');img.src=m.url;img.alt='';thumb.append(img);}else if(m.kind==='video'){const v=document.createElement('video');v.src=m.url;v.muted=true;v.preload='metadata';thumb.append(v);}else {thumb.textContent='♫';}
-      const copy=document.createElement('div');copy.className='media-copy';const name=document.createElement('strong');name.textContent=m.name;name.title=m.name;const meta=document.createElement('span');meta.textContent=(m.kind==='audio'?'שמע':m.kind==='image'?'תמונה':'וידאו')+' · '+fmtSize(m.size);copy.append(name,meta);
-      const btn=document.createElement('button');btn.className='media-add';btn.textContent=m.kind==='audio'?(state.musicId===m.id?'נבחר ✓':'בחר פסקול'):'הוסף +';btn.addEventListener('click',()=>{if(m.kind==='audio'){state.musicId=m.id;updateMusicPanel();renderMediaList();persistLocal();notify('קובץ השמע נבחר כמוזיקת רקע');}else addMediaAsClip(m.id);});
-      card.append(thumb,copy,btn);root.append(card);
+  function measureTextBlock(ctx, layer, W) {
+    const fs=(Number(layer.size)||58)*(W/720)*(Number(layer.scale)||100)/100;
+    const lines=String(layer.content||'').split('\n'); ctx.font=`${layer.italic?'italic ':''}${layer.bold?'900 ':'600 '}${fs}px ${layer.font||'Arial'}`;
+    const maxW=Math.min(W*.9,Math.max(W*.18,Number(layer.maxWidth)||W*.84));
+    const wrapped=[];
+    lines.forEach(line=>{let words=line.split(/\s+/), row='';words.forEach(word=>{const test=row?row+' '+word:word;if(ctx.measureText(test).width>maxW&&row){wrapped.push(row);row=word;}else row=test;});wrapped.push(row);});
+    const lineH=fs*1.18, widths=wrapped.map(line=>ctx.measureText(line).width), width=Math.min(maxW,Math.max(12,...widths)), height=lineH*wrapped.length;
+    return {fs,lines:wrapped,width,height,lineH};
+  }
+  function drawTextLayer(ctx, layer, t,W,H) {
+    const start=Number(layer.start)||0, dur=Number(layer.duration)||4; if(t<start||t>start+dur)return;
+    const elapsed=t-start, remaining=start+dur-t;
+    let alpha=1, scale=1, ox=0, oy=0, typeProgress=1; const intro=Math.min(.55,dur*.22), outro=Math.min(.35,dur*.17);
+    const anim=layer.animIn||'pop';
+    if(elapsed<intro){const p=clamp(elapsed/intro,0,1);if(anim==='fade')alpha=.18+.82*p;else if(anim==='pop'){scale=.84+.16*(1-Math.pow(1-p,3));alpha=Math.min(1,.22+p*1.35);}else if(anim==='slideUp'){oy=(1-p)*H*.06;alpha=Math.min(1,.2+p*1.4);}else if(anim==='slideLeft'){ox=(1-p)*W*.15;alpha=Math.min(1,.2+p*1.3);}else if(anim==='zoom'){scale=.64+.36*p;alpha=Math.min(1,.22+p*1.5);}else if(anim==='type')typeProgress=Math.max(.08,p);}
+    if(remaining<outro&&layer.animOut!=='none'){const p=clamp(remaining/outro,0,1);if(layer.animOut==='fade')alpha=Math.min(alpha,p);else if(layer.animOut==='zoom')scale*=.82+.18*p;else if(layer.animOut==='slideDown')oy+=(1-p)*H*.06;}
+    ctx.save();ctx.globalAlpha=alpha;
+    const x=(Number(layer.x)||50)/100*W+ox, y=(Number(layer.y)||50)/100*H+oy;
+    const box=measureTextBlock(ctx,layer,W),align=layer.align||'center';
+    ctx.translate(x,y);ctx.rotate((Number(layer.rotation)||0)*Math.PI/180);ctx.scale(scale,scale);
+    const pad=Number(layer.backgroundPadding)||.2*box.fs;const bx=align==='left'?-box.width/2:align==='right'?-box.width/2: -box.width/2;
+    if(layer.background&&layer.background!=='none') {ctx.globalAlpha=alpha*(Number(layer.bgOpacity??88)/100);ctx.fillStyle=layer.bgColor||'#14131f';const bw=box.width+pad*2,bh=box.height+pad*1.2;roundRect(ctx,bx-pad,-box.height/2-pad*.55,bw,bh,layer.background==='pill'?bh/2:Math.max(4,box.fs*.12));ctx.fill();ctx.globalAlpha=alpha;}
+    ctx.textAlign=align;ctx.textBaseline='middle';ctx.lineJoin='round';ctx.font=`${layer.italic?'italic ':''}${layer.bold?'900 ':'600 '}${box.fs}px ${layer.font||'Arial'}`;
+    ctx.shadowColor=layer.shadowColor||'#000';ctx.shadowBlur=(Number(layer.shadowBlur)||0)*(W/720);ctx.shadowOffsetY=(Number(layer.shadowBlur)||0)*.14;
+    let shown=box.lines;if(layer.animIn==='type'&&elapsed<intro){const all=box.lines.join('\n');const slice=all.slice(0,Math.max(1,Math.floor(all.length*typeProgress)));shown=slice.split('\n');}
+    const maxWidth=Math.max(...shown.map(l=>ctx.measureText(l).width));const baseX=align==='left'?-maxWidth/2:align==='right'?maxWidth/2:0; // maintain centered group for any text alignment
+    if(layer.outline&&Number(layer.outlineWidth)>0){ctx.lineWidth=(Number(layer.outlineWidth)||0)*(W/720);ctx.strokeStyle=layer.outlineColor||'#15131d';shown.forEach((line,i)=>ctx.strokeText(line,baseX,(i-(shown.length-1)/2)*box.lineH));}
+    if(layer.gradient){const gr=ctx.createLinearGradient(-box.width*.2,-box.height*.3,box.width*.3,box.height*.3);gr.addColorStop(0,layer.color||'#fff');gr.addColorStop(1,layer.color2||'#a78bfa');ctx.fillStyle=gr;}else ctx.fillStyle=layer.color||'#fff';
+    ctx.shadowColor=layer.shadowColor||'#000';shown.forEach((line,i)=>ctx.fillText(line,baseX,(i-(shown.length-1)/2)*box.lineH));
+    ctx.restore();
+  }
+  function drawStickerLayer(ctx, s,t,W,H) {
+    if(t<(s.start||0)||t>(s.start||0)+(s.duration||3))return;
+    const p=(t-(s.start||0))/Math.max(.1,s.duration||3), alpha=Math.min(1,p*8,(1-p)*8+0.1);const size=(Number(s.size)||100)*(W/720);
+    ctx.save();ctx.globalAlpha=clamp(alpha,0,1);ctx.font=`${size}px "Apple Color Emoji","Segoe UI Emoji",sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.translate((s.x||50)/100*W,(s.y||50)/100*H);ctx.rotate((Number(s.rotation)||0)*Math.PI/180);ctx.shadowColor='#0009';ctx.shadowBlur=size*.18;ctx.fillText(s.content||'✨',0,0);ctx.restore();
+  }
+  function renderTo(ctx,t,W,H) {
+    ctx.save();ctx.clearRect(0,0,W,H);ctx.fillStyle='#11131a';ctx.fillRect(0,0,W,H);
+    const clip=activeClipAt(t);
+    if(clip) drawTransition(ctx,clip,t,W,H); else drawDemo(ctx,t,W,H,{demoHue:0});
+    state.texts.forEach(layer=>drawTextLayer(ctx,layer,t,W,H));state.stickers.forEach(s=>drawStickerLayer(ctx,s,t,W,H));
+    ctx.restore();
+  }
+  function draw() { renderTo(ctx,state.currentTime,canvas.width,canvas.height); updateTimeLabels(); updateTextHandles(); }
+  function updateTimeLabels(){ $('currentTime').textContent=fmt(state.currentTime);$('totalTime').textContent=fmt(state.total); }
+  function updateTextHandles(){const l=state.selected.type==='text'?textById(state.selected.id):null;if(!l){$('textHandles').classList.add('hidden');return;}const box=previewFrame.getBoundingClientRect();const rect=canvas.getBoundingClientRect();const left=(Number(l.x)||50)/100*rect.width-rect.width*.34;const top=(Number(l.y)||50)/100*rect.height-rect.height*.08;$('textHandles').style.left=`${Math.max(0,left)}px`;$('textHandles').style.top=`${Math.max(0,top)}px`;$('textHandles').style.width=`${rect.width*.68}px`;$('textHandles').style.height=`${rect.height*.16}px`;$('textHandles').classList.remove('hidden');}
+  function syncPreviewMedia(t, play) {
+    const c=activeClipAt(t),m=c&&mediaById(c.mediaId);
+    for(const item of state.media){if(item.kind==='video'&&item.element!==m?.element){if(!item.element.paused)item.element.pause();item.element.muted=true;item.element.volume=0;}}
+    if(!m||m.kind!=='video')return;
+    const v=m.element;const sourceT=(Number(c.sourceStart)||0)+(t-c.start)*(Number(c.speed)||1);
+    if(!play || lastMediaId!==m.id || Math.abs(v.currentTime-sourceT)>.55){try{v.currentTime=clamp(sourceT,0,Math.max(.05,(m.duration||sourceT+.05)-.04));}catch{}}
+    v.playbackRate=Number(c.speed)||1;v.muted=state.exporting?state.muted:true;v.volume=state.exporting&&!state.muted?(Number(c.volume??100)/100):0;
+    if(play&&v.paused){const p=v.play();if(p&&p.catch)p.catch(()=>{});}else if(!play&&!v.paused)v.pause();
+    lastMediaId=m.id;
+  }
+  function syncAudioPreview(play){state.audios.forEach(a=>{const m=mediaById(a.mediaId);if(!m||m.kind!=='audio')return;const el=m.element;const should=play&&state.currentTime>=a.start&&state.currentTime<=a.start+a.duration;if(should){const pos=state.currentTime-a.start;if(Math.abs(el.currentTime-pos)>.7){try{el.currentTime=pos;}catch{}}el.volume=state.muted?0:Number(a.volume??70)/100;el.play().catch(()=>{});}else el.pause();});}
+  function play() {if(state.playing)return; if(state.currentTime>=state.total-.02)state.currentTime=0;state.playing=true;lastTick=performance.now();syncPreviewMedia(state.currentTime,true);syncAudioPreview(true);$('playBtn').textContent='Ⅱ';setStatus('מנגן…');raf=requestAnimationFrame(tick);}
+  function stopPlayback(){state.playing=false;cancelAnimationFrame(raf);state.media.filter(m=>m.kind==='video').forEach(m=>m.element.pause());state.audios.forEach(a=>mediaById(a.mediaId)?.element.pause());$('playBtn').textContent='▶';setStatus('מוכן לעריכה');draw();}
+  function tick(now){if(!state.playing)return;const dt=Math.min(.1,Math.max(0,(now-lastTick)/1000));lastTick=now;state.currentTime+=dt*state.speed;if(state.currentTime>=state.total){state.currentTime=$('loopBtn').classList.contains('active')?0:state.total;draw();if(state.currentTime>=state.total){stopPlayback();return;}}
+    syncPreviewMedia(state.currentTime,true);syncAudioPreview(true);draw();updatePlayhead();raf=requestAnimationFrame(tick);}
+  function seek(t){state.currentTime=clamp(t,0,state.total);syncPreviewMedia(state.currentTime,false);syncAudioPreview(false);draw();updatePlayhead();renderTimeline();}
+  function updatePlayhead(){const pps=Number(state.zoom)||64;$('playhead').style.left=`${95+state.currentTime*pps}px`;}
+  function setPanel(panel){state.activePanel=panel;document.querySelectorAll('.rail-tool[data-panel]').forEach(b=>b.classList.toggle('active',b.dataset.panel===panel));document.querySelectorAll('.tool-section').forEach(s=>s.classList.toggle('active',s.id===`panel-${panel}`));const names={media:'ספריית המדיה',text:'סטודיו לטקסט',transitions:'מעברים ותנועה',effects:'צבע ואפקטים',templates:'תבניות מהירות',stickers:'ספריית מדבקות',audio:'סטודיו לאודיו'};$('panelTitle').textContent=names[panel]||'כלי עריכה';$('toolPanel').classList.remove('collapsed');}
+  function selectLayer(type,id,shouldRender=true){state.selected={type:type||'',id:id||''};$('inspectorEmpty').classList.toggle('hidden',!!type);$('propertiesContent').classList.toggle('hidden',!type);['textProperties','clipProperties','stickerProperties','audioProperties'].forEach(id2=>$(id2).classList.add('hidden'));
+    const heading={clip:'מאפייני קליפ',text:'עיצוב טקסט',sticker:'מאפייני מדבקה',audio:'מאפייני אודיו'};const typeName={clip:'וידאו',text:'טקסט',sticker:'מדבקה',audio:'אודיו'};$('inspectorHeading').textContent=heading[type]||'מאפייני שכבה';$('selectedType').textContent=typeName[type]||'בחירה';
+    if(type==='text'){const l=textById(id);if(l){$('textProperties').classList.remove('hidden');populateText(l);}}
+    if(type==='clip'){const c=clipById(id);if(c){$('clipProperties').classList.remove('hidden');populateClip(c);}}
+    if(type==='sticker'){const s=stickerById(id);if(s){$('stickerProperties').classList.remove('hidden');populateSticker(s);}}
+    if(type==='audio'){const a=audioById(id);if(a){$('audioProperties').classList.remove('hidden');populateAudio(a);}}
+    renderTimeline();if(shouldRender){draw();} }
+  function populateText(l){$('textContent').value=l.content||'';$('fontFamily').value=l.font||'Arial';$('fontSize').value=l.size||60;$('boldBtn').classList.toggle('active',!!l.bold);$('italicBtn').classList.toggle('active',!!l.italic);$('upperBtn').classList.toggle('active',!!l.upper);document.querySelectorAll('[data-align]').forEach(b=>b.classList.toggle('active',b.dataset.align===(l.align||'center')));$('gradientToggle').checked=!!l.gradient;$('textColor').value=l.color||'#ffffff';$('textColor2').value=l.color2||'#8b5cf6';$('textBackground').value=l.background||'none';$('outlineToggle').checked=l.outline!==false;$('backgroundColor').value=l.bgColor||'#14131f';$('outlineColor').value=l.outlineColor||'#14131f';$('shadowColor').value=l.shadowColor||'#000000';$('outlineWidth').value=l.outlineWidth??3;$('outlineWidthLabel').textContent=$('outlineWidth').value;$('shadowBlur').value=l.shadowBlur??18;$('shadowBlurLabel').textContent=$('shadowBlur').value;$('textIn').value=l.animIn||'pop';$('textOut').value=l.animOut||'fade';$('textStart').value=Number(l.start||0).toFixed(1);$('textDuration').value=Number(l.duration||4).toFixed(1);$('textX').value=l.x??50;$('textY').value=l.y??52;$('textRotation').value=l.rotation||0;$('textRotationLabel').textContent=`${l.rotation||0}°`;$('textScale').value=l.scale||100;}
+  function populateClip(c){const m=mediaById(c.mediaId);$('clipFileName').textContent=m?.name||'סצנת דוגמה';$('clipPropertyArt').style.background=m?.kind==='image'?'linear-gradient(135deg,#243c51,#7c568a)':m?.kind==='video'?'linear-gradient(135deg,#1d3950,#614878)':'linear-gradient(135deg,#282946,#7a508d)';$('clipStart').value=Number(c.sourceStart||0).toFixed(1);$('clipDuration').value=Number(c.duration||5).toFixed(1);$('clipSpeed').value=c.speed||1;$('clipSpeedLabel').textContent=`${Number(c.speed||1).toFixed(2)}×`;$('clipFit').value=c.fit||'cover';$('clipVolume').value=c.volume??100;$('clipTransition').value=c.transition||'none';$('clipBrightness').value=c.brightness||100;$('clipBrightnessLabel').textContent=`${c.brightness||100}%`;}
+  function populateSticker(s){$('stickerContent').value=s.content||'✨';$('stickerSize').value=s.size||100;$('stickerX').value=s.x||50;$('stickerY').value=s.y||50;$('stickerStart').value=Number(s.start||0).toFixed(1);$('stickerDuration').value=Number(s.duration||3).toFixed(1);}
+  function populateAudio(a){const m=mediaById(a.mediaId);$('audioClipName').value=m?.name||'רצועת אודיו';$('audioStart').value=Number(a.start||0).toFixed(1);$('audioDuration').value=Number(a.duration||state.total).toFixed(1);$('audioVolume').value=a.volume??70;$('audioVolumeLabel').textContent=`${a.volume??70}%`;}
+  function addText(content='הסיפור שלך מתחיל כאן',preset='clean') {recordHistory();const p=presetText[preset]||{};const l={id:uid('text'),content,kind:'text',start:clamp(state.currentTime,0,Math.max(0,state.total-.1)),duration:Math.min(4,Math.max(.5,state.total-state.currentTime)),x:50,y:52,size:62,font:'Arial',bold:true,italic:false,upper:false,align:'center',color:'#ffffff',color2:'#a78bfa',gradient:false,background:'none',bgColor:'#14131f',bgOpacity:88,outline:true,outlineColor:'#17131d',outlineWidth:3,shadowColor:'#000000',shadowBlur:16,animIn:'pop',animOut:'fade',scale:100,rotation:0,...p};state.texts.push(l);selectLayer('text',l.id);setPanel('text');renderAll();notify('שכבת טקסט חדשה נוספה');return l; }
+  function addSticker(content){recordHistory();const s={id:uid('sticker'),content,kind:'sticker',start:clamp(state.currentTime,0,Math.max(0,state.total-.1)),duration:3,x:50,y:46,size:106,rotation:0};state.stickers.push(s);selectLayer('sticker',s.id);setPanel('stickers');renderAll();notify('המדבקה נוספה');}
+  function addDemoClip(hue=0, append=true){recordHistory();const c={id:uid('clip'),mediaId:'demo',kind:'demo',duration:8,sourceStart:0,speed:1,volume:0,transition:'fade',transitionDuration:.6,filter:'none',brightness:100,fit:'cover',demoHue:hue};if(!append&&state.clips.length)state.clips=[c];else state.clips.push(c);recompute();selectLayer('clip',c.id);renderAll();notify('סצנת דוגמה נוספה לציר הזמן');}
+  function addMediaToTimeline(media){if(media.kind==='audio'){addAudioTrack(media.id);return;}recordHistory();const c={id:uid('clip'),mediaId:media.id,kind:media.kind,duration:media.kind==='image'?4:Math.max(.25,Math.min(60,media.duration||5)),sourceStart:0,speed:1,volume:100,transition:state.clips.length?'fade':'none',transitionDuration:.6,filter:'none',brightness:100,contrast:100,saturation:100,fit:'cover'};state.clips.push(c);recompute();selectLayer('clip',c.id);renderAll();notify('המדיה נוספה לציר הזמן');}
+  async function ensureAudio(){if(!audioContext){const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return null;audioContext=new AC();audioDestination=audioContext.createMediaStreamDestination();}if(audioContext.state==='suspended')await audioContext.resume();for(const m of state.media){if((m.kind==='video'||m.kind==='audio')&&!audioNodes.has(m.id)){try{const node=audioContext.createMediaElementSource(m.element);node.connect(audioContext.destination);node.connect(audioDestination);audioNodes.set(m.id,node);}catch(e){console.warn('Audio route unavailable for',m.name,e);}}}return audioContext;}
+  function fileDuration(file){return new Promise(resolve=>{if(file.type.startsWith('image/'))return resolve(4);const element=file.type.startsWith('audio/')?document.createElement('audio'):document.createElement('video');element.preload='metadata';element.onloadedmetadata=()=>{const d=Number.isFinite(element.duration)?element.duration:5;if(element.src.startsWith('blob:'))URL.revokeObjectURL(element.src);resolve(d);};element.onerror=()=>resolve(5);element.src=URL.createObjectURL(file);});}
+  async function importFiles(files){const list=[...files];if(!list.length)return;let added=0;for(const file of list){if(!file.type.startsWith('video/')&&!file.type.startsWith('image/')&&!file.type.startsWith('audio/'))continue;
+      const id=uid('media'),url=URL.createObjectURL(file),kind=file.type.startsWith('video/')?'video':file.type.startsWith('image/')?'image':'audio';
+      const obj={id,name:file.name,file,url,kind,type:file.type,size:file.size,duration:kind==='image'?4:5,element:null};
+      if(kind==='image'){const im=new Image();im.onload=()=>draw();im.src=url;obj.element=im;}
+      else if(kind==='video'){const v=document.createElement('video');v.src=url;v.preload='auto';v.playsInline=true;v.muted=true;v.volume=0;v.addEventListener('loadedmetadata',()=>{obj.duration=Math.max(.25,v.duration||5);if(!obj.duration||!Number.isFinite(obj.duration))obj.duration=5;renderMedia();});v.addEventListener('error',()=>notify(`הדפדפן לא הצליח לקרוא את ${file.name}`,'error'));obj.element=v;try{await v.load();}catch{}const d=await fileDuration(file);obj.duration=Math.max(.25,d);}
+      else {const a=new Audio(url);a.preload='auto';a.loop=false;a.volume=.7;obj.element=a;const d=await fileDuration(file);obj.duration=Math.max(.25,d);}
+      state.media.push(obj);added++;if(kind==='audio'){addAudioTrack(id,false);}else addMediaToTimeline(obj);
     }
+    renderMedia();renderAudioList();notify(added?`${added} קבצים נוספו לפרויקט`:'לא נמצאו קבצים נתמכים',added?'success':'error');
   }
-
-  function renderAll() { renderMediaList();renderTimeline();updatePreview();updateClipControls();updateMusicPanel();updateSettingsControls();updateUndoButtons();$('projectLabel').textContent=state.projectName||'פרויקט חדש'; }
-  function renderTimeline() {
-    const track=$('videoTrack');track.textContent=''; const music=$('audioTrack');music.textContent=''; const total=totalLength(), zoom=state.zoom;
-    if(!state.clips.length){const e=document.createElement('div');e.className='track-empty';e.textContent='הקליפים שלך יופיעו כאן אחרי הייבוא';track.append(e);} else {
-      state.clips.forEach((c,index)=>{const m=getMedia(c.mediaId);const el=document.createElement('div');el.className='clip-block'+(c.id===state.selected?' selected':'');el.draggable=true;el.dataset.clipId=c.id;el.style.width=Math.max(67,clipLength(c)*zoom)+'px';
-        const t=document.createElement('span');t.className='clip-title';t.textContent=m?m.name:c.name;const meta=document.createElement('span');meta.className='clip-meta';meta.textContent=fmt(clipLength(c));el.append(t,meta);
-        el.addEventListener('click',()=>selectClip(c.id));el.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',String(index));e.dataTransfer.effectAllowed='move';el.classList.add('dragging');});el.addEventListener('dragend',()=>el.classList.remove('dragging'));el.addEventListener('dragover',e=>{e.preventDefault();e.dataTransfer.dropEffect='move';});el.addEventListener('drop',e=>{e.preventDefault();const from=Number(e.dataTransfer.getData('text/plain'));const to=state.clips.findIndex(x=>x.id===c.id);if(Number.isInteger(from)&&from!==to&&from>=0){pushUndo();const [moved]=state.clips.splice(from,1);state.clips.splice(to,0,moved);renderTimeline();persistLocal();}});track.append(el);
-      });
-    }
-    if(state.musicId&&getMedia(state.musicId)) {const m=getMedia(state.musicId);const el=document.createElement('div');el.className='clip-block audio-clip';el.style.width=Math.max(85,(total||4)*zoom)+'px';const title=document.createElement('span');title.className='clip-title';title.textContent='♫ '+m.name;const meta=document.createElement('span');meta.className='clip-meta';meta.textContent='מוזיקת רקע · '+Math.round(state.musicVolume*100)+'%';el.append(title,meta);music.append(el);} else {const e=document.createElement('div');e.className='track-empty';e.textContent='אפשר להוסיף מוזיקת רקע מהכלים משמאל';music.append(e);}
-    const px=Math.max(500,Math.min(18000,total*zoom+130));track.style.width=px+'px';music.style.width=px+'px';$('ruler').style.width=px+'px';$('ruler').textContent='';const r=$('ruler');const label=document.createElement('span');label.textContent='00:00';r.append(label);for(let n=2;n<=Math.max(2,total);n+=2){const l=document.createElement('span');l.textContent=plainTime(n);r.append(l);}const playhead=$('playhead');playhead.style.right=(84+(window.previewCurrentTime||0)*zoom)+'px';playhead.style.display=state.clips.length?'block':'none';
-    $('timelineSummary').textContent=`${state.clips.length} קליפים · ${plainTime(total)}`;$('durationTime').textContent=fmt(total);$('playbackZoom').value=String(state.zoom);
-  }
-  function selectClip(id) {const c=state.clips.find(x=>x.id===id);if(!c)return;state.selected=id;updatePreview(true);updateClipControls();renderTimeline();}
-  function updatePreview(seek=false) {
-    const c=getClip(),video=$('previewVideo'),img=$('previewImage'),empty=$('placeholder'),frame=$('previewFrame'),caption=$('captionOverlay');
-    frame.classList.remove('ratio-16-9','ratio-9-16','ratio-1-1','ratio-4-5');frame.classList.add('ratio-'+state.ratio.replace(':','-'));
-    if(!c){video.pause();video.style.display='none';img.style.display='none';empty.style.display='flex';caption.style.display='none';$('previewMeta').textContent='אין קליפ נבחר';$('currentTime').textContent='00:00.0';window.previewCurrentTime=0;return;}
-    const m=getMedia(c.mediaId);if(!m){return;}
-    empty.style.display='none';const filter=(FILTERS[c.filter]||'none')+` brightness(${(c.brightness||1)*state.brightness}) contrast(${(c.contrast||1)*state.contrast}) saturate(${(c.saturation||1)*state.saturation})`;
-    if(m.kind==='image'){video.pause();video.style.display='none';img.style.display='block';if(img.src!==m.url)img.src=m.url;img.style.objectFit=state.fit;img.style.filter=filter;}
-    else {img.style.display='none';video.style.display='block';video.style.objectFit=state.fit;video.style.filter=filter;if(activeUrl!==m.url){video.pause();video.src=m.url;activeUrl=m.url;video.load();seek=true;}video.muted=previewMuted;if(seek){try{video.currentTime=Math.min(c.outPoint-.01,c.inPoint);}catch{}}}
-    caption.textContent=c.text||'';caption.style.display=c.text?'block':'none';caption.className='caption-overlay '+(c.textStyle||'bold')+' '+(c.textPosition||'bottom');caption.style.fontSize=(c.textSize||42)+'px';
-    $('previewMeta').textContent=m.name;$('currentTime').textContent=fmt((Number(video.currentTime)||c.inPoint));$('durationTime').textContent=fmt(totalLength());$('playBtn').textContent=(!video.paused&&m.kind==='video')?'Ⅱ':'▶';
-  }
-  function filterCss(c) {return (FILTERS[c.filter]||'none')+` brightness(${(c.brightness||1)*state.brightness}) contrast(${(c.contrast||1)*state.contrast}) saturate(${(c.saturation||1)*state.saturation})`;}
-  function updateClipControls() {
-    const c=getClip();$('selectedClipLabel').textContent=c?c.name:'לא נבחר';$('trimHint').textContent=c?'החיתוך חל על הקליפ המסומן':'בחר קליפ כדי לערוך התחלה וסיום';
-    const controls=['trimStart','trimEnd','clipSpeed','clipName','applyTrimBtn','clipText','applyTextBtn','clearTextBtn'];controls.forEach(id=>$(id).disabled=!c);
-    if(c){$('trimStart').value=Number(c.inPoint).toFixed(1);$('trimEnd').value=Number(c.outPoint).toFixed(1);$('clipSpeed').value=String(c.speed||1);$('clipName').value=c.name;$('clipText').value=c.text||'';$('clipVolume').value=String(Math.round((c.volume??1)*100));$('clipVolumeValue').textContent=Math.round((c.volume??1)*100)+'%';}
-    document.querySelectorAll('.filter-option').forEach(el=>el.classList.toggle('selected',!!c&&el.dataset.filter===c.filter));
-    $('brightness').value=String(Math.round((c?.brightness??1)*100));$('brightnessValue').textContent=Math.round((c?.brightness??1)*100)+'%';$('contrast').value=String(Math.round((c?.contrast??1)*100));$('contrastValue').textContent=Math.round((c?.contrast??1)*100)+'%';$('saturation').value=String(Math.round((c?.saturation??1)*100));$('saturationValue').textContent=Math.round((c?.saturation??1)*100)+'%';
-    $('textStyle').value=c?.textStyle||state.textStyle;$('textPosition').value=c?.textPosition||state.textPosition;$('textSize').value=String(c?.textSize||state.textSize);$('textSizeValue').textContent=String(c?.textSize||state.textSize);
-  }
-  function updateMusicPanel(){const m=getMedia(state.musicId);$('musicName').textContent=m?m.name:'לא נבחר קובץ שמע';$('musicVolume').value=String(Math.round(state.musicVolume*100));$('musicVolumeValue').textContent=Math.round(state.musicVolume*100)+'%';}
-  function updateSettingsControls(){ $('aspectRatio').value=state.ratio;$('fitMode').value=state.fit; }
-  function applyTrim(){const c=getClip();if(!c)return;const m=getMedia(c.mediaId);let start=sec($('trimStart').value),end=sec($('trimEnd').value);const max=m?.duration||c.duration||end;if(end>max)end=max;if(start>=end){notify('נקודת הסיום חייבת להיות אחרי נקודת ההתחלה');return;}pushUndo();c.inPoint=start;c.outPoint=end;c.speed=Number($('clipSpeed').value)||1;c.name=$('clipName').value.trim()||c.name;renderAll();persistLocal();notify('החיתוך והמהירות עודכנו');}
-  function applyText(){const c=getClip();if(!c)return pushNoticeNoClip();pushUndo();c.text=$('clipText').value;c.textStyle=$('textStyle').value;c.textPosition=$('textPosition').value;c.textSize=Number($('textSize').value);state.textStyle=c.textStyle;state.textPosition=c.textPosition;state.textSize=c.textSize;updatePreview();persistLocal();notify('הטקסט עודכן');}
-  function pushNoticeNoClip(){notify('תחילה בחר קליפ בציר הזמן');}
-  function splitClip(){const c=getClip();if(!c)return pushNoticeNoClip();const m=getMedia(c.mediaId);if(!m||m.kind!=='video')return notify('פיצול זמין לקליפ וידאו');const t=Number($('previewVideo').currentTime)||c.inPoint;if(t<=c.inPoint+.1||t>=c.outPoint-.1)return notify('נקודת הניגון צריכה להיות בתוך הקליפ');pushUndo();const originalEnd=c.outPoint;const second={...clone(c),id:uid(),name:c.name+' – חלק 2',inPoint:t,outPoint:originalEnd};c.outPoint=t;const index=state.clips.findIndex(x=>x.id===c.id);state.clips.splice(index+1,0,second);state.selected=second.id;renderAll();persistLocal();notify('הקליפ פוצל לשני חלקים');}
-  function duplicateClip(){const c=getClip();if(!c)return pushNoticeNoClip();pushUndo();const copy={...clone(c),id:uid(),name:c.name+' – עותק'};const i=state.clips.findIndex(x=>x.id===c.id);state.clips.splice(i+1,0,copy);state.selected=copy.id;renderAll();persistLocal();notify('נוצר עותק של הקליפ');}
-  function deleteClip(){const c=getClip();if(!c)return pushNoticeNoClip();pushUndo();const i=state.clips.findIndex(x=>x.id===c.id);state.clips.splice(i,1);state.selected=state.clips[Math.min(i,state.clips.length-1)]?.id||null;renderAll();persistLocal();notify('הקליפ הוסר מציר הזמן');}
-  function updatePlayhead() {const v=$('previewVideo'),c=getClip();if(!c)return;const t=Number(v.currentTime)||0;window.previewCurrentTime=t;const local=(t-c.inPoint)/Math.max(.25,c.speed||1);$('currentTime').textContent=fmt(Math.max(0,local));$('playhead').style.right=(84+timelineOffset(c)*state.zoom)+'px';}
-  function timelineOffset(c){let t=0;for(const clip of state.clips){if(clip.id===c.id)break;t+=clipLength(clip);}return t;}
-  function applyLiveFilter(){const c=getClip();if(!c)return;const val=FILTERS[c.filter]||'none';$('previewVideo').style.filter=val+` brightness(${(c.brightness||1)*state.brightness}) contrast(${(c.contrast||1)*state.contrast}) saturate(${(c.saturation||1)*state.saturation})`;$('previewImage').style.filter=$('previewVideo').style.filter;}
-
-  function drawSource(ctx,source,w,h,fit){const sw=source.videoWidth||source.naturalWidth||source.width,sh=source.videoHeight||source.naturalHeight||source.height;if(!sw||!sh)return;let scale=fit==='contain'?Math.min(w/sw,h/sh):Math.max(w/sw,h/sh);let dw=sw*scale,dh=sh*scale;ctx.drawImage(source,(w-dw)/2,(h-dh)/2,dw,dh);}
-  function drawCaption(ctx,c,w,h){if(!c.text)return;const text=String(c.text).slice(0,500),size=Math.min(c.textSize||42,Math.round(w*.11)),lines=text.split('\n').slice(0,5);ctx.save();ctx.font=`800 ${size}px Arial, sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';const lineH=size*1.3;const widths=lines.map(line=>Math.min(w*.88,ctx.measureText(line).width));const maxWidth=Math.max(0,...widths);let y=c.textPosition==='top'?h*.13:c.textPosition==='center'?h/2:h*.87-(lines.length-1)*lineH/2;
-    if(c.textStyle==='box'){ctx.fillStyle='rgba(0,0,0,.68)';ctx.beginPath();const x=(w-maxWidth)/2-18,yy=y-(lines.length*lineH)/2-7;ctx.roundRect?ctx.roundRect(x,yy,maxWidth+36,lines.length*lineH+14,10):ctx.rect(x,yy,maxWidth+36,lines.length*lineH+14);ctx.fill();}
-    lines.forEach((line,i)=>{const yy=y+i*lineH;if(c.textStyle==='outline'){ctx.lineWidth=Math.max(2,size*.06);ctx.strokeStyle='#111';ctx.strokeText(line,w/2,yy,maxWidth||w*.9);}ctx.fillStyle='#fff';ctx.shadowColor='#000';ctx.shadowBlur=size*.16;ctx.shadowOffsetY=2;ctx.fillText(line,w/2,yy,w*.9);});ctx.restore();}
-  function canvasDraw(ctx,source,c,w,h){ctx.save();ctx.fillStyle='#000';ctx.fillRect(0,0,w,h);ctx.filter=filterCss(c);drawSource(ctx,source,w,h,state.fit);ctx.filter='none';drawCaption(ctx,c,w,h);ctx.restore();}
-  function readAsDataURL(file){return new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(file);});}
-  function dataUrlBlob(dataUrl){const [head,b64]=dataUrl.split(',');const mime=(head.match(/data:([^;]+)/)||[])[1]||'application/octet-stream';const bin=atob(b64);const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return new Blob([arr],{type:mime});}
-  async function exportProject(){if(!state.clips.length&&!state.media.size)return notify('אין פרויקט לייצוא');const all=[...state.media.values()];const total=all.reduce((a,m)=>a+m.size,0);if(total>180*1024*1024){notify('הפרויקט גדול מדי לקובץ אחד. הוא נשמר מקומית בדפדפן, וניתן לייצא וידאו בנפרד.',6000);return;}
-    try{const media=[];for(let i=0;i<all.length;i++){const m=all[i];media.push({id:m.id,name:m.name,type:m.type,duration:m.duration,kind:m.kind,data:await readAsDataURL(m.file)});}const data={format:'cutlab-project',version:1,createdAt:new Date().toISOString(),snapshot:snapshot(),media};const blob=new Blob([JSON.stringify(data)],{type:'application/json'});const saved=await downloadBlob(blob,(state.projectName||'cutlab-project').replace(/[^\w\u0590-\u05FF-]+/g,'_')+'.cutproj');if(saved)notify('קובץ הפרויקט נשמר, כולל קובצי המדיה');}catch(e){notify('לא הצלחתי לארוז את הפרויקט. נסה לשמור מקומית או לייצא וידאו.');}}
-  async function importProjectFile(file){try{const text=await file.text();const data=JSON.parse(text);if(data.format!=='cutlab-project'||!Array.isArray(data.media))throw new Error('פורמט לא תקין');for(const m of state.media.values())URL.revokeObjectURL(m.url);state.media.clear();for(const raw of data.media){const blob=dataUrlBlob(raw.data);const fileObj=new File([blob],raw.name,{type:raw.type||blob.type});await registerMedia(fileObj,raw.id,raw.duration);}Object.assign(state,data.snapshot||{});state.clips=Array.isArray(data.snapshot?.clips)?data.snapshot.clips:[];state.selected=state.clips.some(c=>c.id===state.selected)?state.selected:state.clips[0]?.id||null;state.projectName=file.name.replace(/\.cutproj$|\.json$/i,'');renderAll();persistLocal();notify('הפרויקט נטען בהצלחה');}catch(e){notify('לא הצלחתי לפתוח את קובץ הפרויקט');}}
-  async function downloadBlob(blob,name){
-    const native=window.CUTLABNative;
-    if(native&&typeof native.requestSave==='function'&&typeof native.writeChunk==='function'&&typeof native.finishSave==='function'){
-      const saved=await new Promise(resolve=>{
-        let settled=false;
-        window.__cutlabNativeSaveReady=async ready=>{
-          if(settled)return;settled=true;window.__cutlabNativeSaveReady=null;
-          if(!ready){resolve(false);return;}
-          try{
-            const chunkSize=256*1024;
-            for(let offset=0;offset<blob.size;offset+=chunkSize){
-              const bytes=new Uint8Array(await blob.slice(offset,offset+chunkSize).arrayBuffer());
-              let binary='';for(let i=0;i<bytes.length;i++)binary+=String.fromCharCode(bytes[i]);
-              if(!native.writeChunk(btoa(binary)))throw new Error('הכתיבה לקובץ נכשלה');
-            }
-            native.finishSave(true);resolve(true);
-          }catch(error){try{native.finishSave(false);}catch{}notify(error?.message||'לא ניתן לשמור את הקובץ');resolve(false);}
-        };
-        try{native.requestSave(name,blob.type||'application/octet-stream');}catch(error){window.__cutlabNativeSaveReady=null;resolve(false);}
-      });
-      if(saved)notify('הקובץ נשמר במכשיר');else notify('השמירה בוטלה או נכשלה');
-      return saved;
-    }
-    const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);return true;
-  }
-  function ratioSize(){switch(state.ratio){case'9:16':return[720,1280];case'1:1':return[1080,1080];case'4:5':return[864,1080];default:return[1280,720];}}
-  function sleep(ms){return new Promise(resolve=>{activeExportTimer=setTimeout(resolve,ms);});}
-  function waitEvent(el,success,error='error',timeout=15000){return new Promise((resolve,reject)=>{let done=false;const clean=()=>{el.removeEventListener(success,ok);el.removeEventListener(error,bad);clearTimeout(t);};const ok=()=>{if(done)return;done=true;clean();resolve();};const bad=()=>{if(done)return;done=true;clean();reject(new Error('המדיה לא נטענה'));};const t=setTimeout(()=>{if(done)return;done=true;clean();reject(new Error('פג הזמן להמתנה למדיה'));},timeout);el.addEventListener(success,ok,{once:true});el.addEventListener(error,bad,{once:true});});}
-  async function runExport(){if(exporting)return;if(!state.clips.length)return notify('הוסף לפחות קליפ אחד לפני הייצוא');if(!window.MediaRecorder||!HTMLCanvasElement.prototype.captureStream)return notify('הדפדפן הזה לא תומך בייצוא וידאו. נסה Chrome עדכני.');
-    exporting=true;cancelExport=false;activeRecorder=null;$('exportModal').hidden=false;$('exportTitle').textContent='מכינים את הסרטון';$('exportMessage').textContent='מכין את ציר הזמן ואת מקורות המדיה…';$('exportProgress').style.width='0%';$('cancelExportBtn').textContent='בטל ייצוא';
-    let canvasStream=null,audioCtx=null,recStream=null,renderVideo=null,musicAudio=null,raf=0;const chunks=[];let blobResult=null;
-    try{
-      const [w,h]=ratioSize();const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{alpha:false});
-      renderVideo=document.createElement('video');renderVideo.playsInline=true;renderVideo.preload='auto';renderVideo.crossOrigin='anonymous';renderVideo.muted=false;
-      audioCtx=new (window.AudioContext||window.webkitAudioContext)();await audioCtx.resume();const dest=audioCtx.createMediaStreamDestination();const videoSource=audioCtx.createMediaElementSource(renderVideo);const clipGain=audioCtx.createGain();clipGain.gain.value=1;videoSource.connect(clipGain);clipGain.connect(dest);
-      if(state.musicId&&getMedia(state.musicId)) {musicAudio=document.createElement('audio');musicAudio.src=getMedia(state.musicId).url;musicAudio.loop=true;musicAudio.preload='auto';const musicSource=audioCtx.createMediaElementSource(musicAudio);const musicGain=audioCtx.createGain();musicGain.gain.value=state.musicVolume;musicSource.connect(musicGain);musicGain.connect(dest);}
-      canvasStream=canvas.captureStream(30);recStream=new MediaStream([...canvasStream.getVideoTracks(),...dest.stream.getAudioTracks()]);
-      const types=['video/mp4;codecs=avc1.42E01E,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];const mime=types.find(t=>MediaRecorder.isTypeSupported(t))||'';const opts=mime?{mimeType:mime,videoBitsPerSecond:6500000}:undefined;const recorder=new MediaRecorder(recStream,opts);activeRecorder=recorder;recorder.ondataavailable=e=>{if(e.data&&e.data.size)chunks.push(e.data);};const stopped=new Promise((resolve,reject)=>{recorder.onstop=()=>resolve();recorder.onerror=e=>reject(e.error||new Error('שגיאת מקליט'));});
-      let activeClip=null,activeSource=null,activeImage=null,drawRunning=true;
-      const drawLoop=()=>{if(!drawRunning)return;try{if(activeClip&&activeSource)canvasDraw(ctx,activeSource,activeClip,w,h);else{ctx.fillStyle='#07070a';ctx.fillRect(0,0,w,h);}}catch(e){}raf=requestAnimationFrame(drawLoop);};drawLoop();
-      recorder.start(1000);
-      if(musicAudio){try{musicAudio.currentTime=0;await musicAudio.play();}catch(e){notify('דפדפן מנע את מוזיקת הרקע; ייצוא הקליפים ימשיך');}}
-      for(let i=0;i<state.clips.length;i++){
-        if(cancelExport)throw new Error('הייצוא בוטל');const clip=state.clips[i],m=getMedia(clip.mediaId);if(!m)continue;activeClip=clip;$('exportTitle').textContent=`מייצא קליפ ${i+1} מתוך ${state.clips.length}`;$('exportMessage').textContent=m.name;$('exportProgress').style.width=Math.round(i/state.clips.length*100)+'%';clipGain.gain.value=clip.volume??1;
-        if(m.kind==='image'){const im=new Image();activeImage=im;await new Promise((resolve,reject)=>{im.onload=resolve;im.onerror=reject;im.src=m.url;});activeSource=im;await sleep(clipLength(clip)*1000);clearTimeout(activeExportTimer);}
-        else if(m.kind==='video'){
-          activeSource=renderVideo;if(renderVideo.src!==m.url){renderVideo.pause();renderVideo.src=m.url;renderVideo.load();await waitEvent(renderVideo,'loadedmetadata');}
-          const start=Math.min(Math.max(0,clip.inPoint),Math.max(0,(renderVideo.duration||m.duration)-.05));renderVideo.currentTime=start;await new Promise(resolve=>{const check=()=>{if(renderVideo.readyState>=2){renderVideo.removeEventListener('seeked',check);resolve();}};renderVideo.addEventListener('seeked',check);setTimeout(()=>{renderVideo.removeEventListener('seeked',check);resolve();},3000);});
-          renderVideo.playbackRate=Math.min(3,Math.max(.25,clip.speed||1));try{await renderVideo.play();}catch(e){throw new Error('לא ניתן לנגן את אחד מקובצי הווידאו לייצוא');}
-          await sleep(clipLength(clip)*1000+80);clearTimeout(activeExportTimer);renderVideo.pause();
+  function addAudioTrack(mediaId,history=true){const m=mediaById(mediaId);if(!m)return;if(history)recordHistory();const a={id:uid('audio'),mediaId,start:0,duration:Math.min(m.duration||state.total,Math.max(m.duration||state.total,state.total)),volume:70};state.audios.push(a);selectLayer('audio',a.id);renderAudioList();renderTimeline();setPanel('audio');notify('רצועת אודיו נוספה');}
+  function renderMedia(){const grid=$('mediaGrid');$('mediaCount').textContent=state.media.length;grid.innerHTML='';if(!state.media.length){grid.innerHTML='<div class="empty-state"><span>▧</span><strong>ספריית המדיה ריקה</strong><small>ייבא קבצים או התחל מסצנת הדוגמה</small></div>';return;}
+    state.media.forEach(m=>{const card=document.createElement('div');card.className='media-card';card.tabIndex=0;card.title=m.name;const thumb=document.createElement('div');thumb.className='media-thumb';if(m.kind==='image'&&m.element){const im=document.createElement('img');im.src=m.url;thumb.appendChild(im);}else if(m.kind==='video'&&m.element){const v=document.createElement('video');v.src=m.url;v.muted=true;v.preload='metadata';thumb.appendChild(v);}else{thumb.textContent='♫';thumb.style.color='#7ff0d9';thumb.style.fontSize='28px';}const badge=document.createElement('span');badge.className='media-kind';badge.textContent=m.kind==='video'?'VIDEO':m.kind==='image'?'IMAGE':'AUDIO';thumb.appendChild(badge);const body=document.createElement('div');body.className='media-card-body';const b=document.createElement('b');b.textContent=m.name;const small=document.createElement('small');small.textContent=m.kind==='audio'?`${fmt(m.duration)} · אודיו`:m.kind==='image'?`${(m.size/1024).toFixed(0)} KB · תמונה`:`${fmt(m.duration)} · ${m.kind==='video'?'וידאו':'מדיה'}`;body.append(b,small);card.append(thumb,body);if(m.kind!=='audio'){const btn=document.createElement('button');btn.className='media-add-track';btn.textContent='＋ הוסף לטיימליין';btn.onclick=e=>{e.stopPropagation();addMediaToTimeline(m);};card.appendChild(btn);}else{const btn=document.createElement('button');btn.className='media-add-track';btn.textContent='♫ הוסף אודיו';btn.onclick=e=>{e.stopPropagation();addAudioTrack(m.id);};card.appendChild(btn);}card.addEventListener('click',()=>{if(m.kind==='audio')addAudioTrack(m.id);else addMediaToTimeline(m);});card.addEventListener('keydown',e=>{if(e.key==='Enter')card.click();});grid.appendChild(card);});}
+  function renderAudioList(){const list=$('audioList');$('audioCount').textContent=state.audios.length;list.innerHTML='';if(!state.audios.length){list.innerHTML='<div class="empty-inline">עדיין לא נוסף אודיו</div>';return;}state.audios.forEach(a=>{const m=mediaById(a.mediaId);const row=document.createElement('div');row.className='audio-item';const note=document.createElement('span');note.className='note';note.textContent='♫';const meta=document.createElement('div');const b=document.createElement('b');b.textContent=m?.name||'רצועת אודיו';const s=document.createElement('small');s.textContent=`${fmt(a.duration)} · ${a.volume}%`;meta.append(b,s);const btn=document.createElement('button');btn.textContent='עריכה';btn.onclick=()=>selectLayer('audio',a.id);row.append(note,meta,btn);list.append(row);});}
+  function renderAll(){recompute();renderMedia();renderAudioList();renderTimeline();draw();updatePlayhead();$('timelineClipCount').textContent=`${state.clips.length} ${state.clips.length===1?'קליפ':'קליפים'}`;$('timelineLayerCount').textContent=`${state.texts.length+state.stickers.length+state.audios.length} שכבות`;}
+  function renderTimeline(){const pps=Number(state.zoom)||64;const totalW=Math.max(300,Math.ceil(state.total*pps)+40);$('timelineContent').style.width=`${95+totalW}px`;document.querySelectorAll('.track-content').forEach(el=>el.style.width=`${totalW}px`);$('timelineRuler').style.width=`${95+totalW}px`;let ruler='';$('timelineRuler').innerHTML='';for(let s=0;s<=state.total+0.001;s+=1){const tick=document.createElement('span');tick.className='ruler-label';tick.style.left=`${95+s*pps}px`;tick.textContent=String(Math.floor(s)).padStart(2,'0');$('timelineRuler').appendChild(tick);}const mapping=[['videoTrack',state.clips,'clip','video'],['textTrack',state.texts,'text','text'],['stickerTrack',state.stickers,'sticker','sticker'],['audioTrack',state.audios,'audio','audio']];mapping.forEach(([trackId,items,type,css])=>{const track=$(trackId);track.innerHTML='';items.forEach((item,index)=>{let start=type==='clip'?item.start:Number(item.start)||0;let duration=Number(item.duration)||(type==='clip'?5:3);if(type==='audio')start=item.start||0;const el=document.createElement('div');el.className=`timeline-clip ${css}${state.selected.type===type&&state.selected.id===item.id?' selected':''}`;el.style.left=`${start*pps}px`;el.style.width=`${Math.max(24,duration*pps)}px`;el.dataset.id=item.id;el.dataset.type=type;el.draggable=type==='clip';const span=document.createElement('span');const media=mediaById(item.mediaId);span.textContent=type==='clip'?(media?.name||'CUTLAB Demo'):type==='text'?String(item.content||'טקסט'):type==='sticker'?String(item.content||'מדבקה'):(media?.name||'אודיו');el.appendChild(span);if(type==='audio'){const wave=document.createElement('i');wave.className='waveform';el.appendChild(wave);}if(type==='clip'){const idx=clipIndex(item.id);if(idx>0&&item.transition!=='none'){const badge=document.createElement('span');badge.className='timeline-transition';badge.style.left=`${start*pps-8}px`;badge.textContent='✦';track.appendChild(badge);}
+          el.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',item.id);e.dataTransfer.effectAllowed='move';});el.addEventListener('dragover',e=>{e.preventDefault();el.style.outline='1px dashed #d3bfff';});el.addEventListener('dragleave',()=>el.style.outline='');el.addEventListener('drop',e=>{e.preventDefault();el.style.outline='';const from=state.clips.findIndex(c=>c.id===e.dataTransfer.getData('text/plain'));const to=state.clips.findIndex(c=>c.id===item.id);if(from>=0&&to>=0&&from!==to){recordHistory();const [moved]=state.clips.splice(from,1);state.clips.splice(to,0,moved);recompute();renderAll();notify('סדר הקליפים עודכן');}});
+          const grip=document.createElement('i');grip.className='clip-resize';grip.title='גרור לשינוי אורך';el.appendChild(grip);grip.addEventListener('pointerdown',e=>{e.preventDefault();e.stopPropagation();recordHistory();resizeDrag={id:item.id,type,duration:item.duration,startX:e.clientX,pps};grip.setPointerCapture?.(e.pointerId);});
         }
-        $('exportProgress').style.width=Math.round((i+1)/state.clips.length*100)+'%';
-      }
-      drawRunning=false;cancelAnimationFrame(raf);if(musicAudio)musicAudio.pause();if(renderVideo)renderVideo.pause();if(recorder.state!=='inactive')recorder.stop();await stopped;blobResult=new Blob(chunks,{type:recorder.mimeType||'video/webm'});if(cancelExport)throw new Error('הייצוא בוטל');
-      const ext=(blobResult.type||'').includes('mp4')?'mp4':'webm';const date=new Date();const tag=[date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0'),'-',String(date.getHours()).padStart(2,'0'),String(date.getMinutes()).padStart(2,'0')].join('');const saved=await downloadBlob(blobResult,'CUTLAB-'+tag+'.'+ext);if(!saved)throw new Error('השמירה בוטלה או נכשלה');$('exportTitle').textContent='הייצוא הושלם ✓';$('exportMessage').textContent=`הסרטון נשמר כקובץ ${ext.toUpperCase()} (${fmtSize(blobResult.size)}).`; $('exportProgress').style.width='100%';$('cancelExportBtn').textContent='סיום';notify('הסרטון יוצא בהצלחה');
-    }catch(e){if(!cancelExport){$('exportTitle').textContent='לא הצלחנו לייצא';$('exportMessage').textContent=e?.message||'שגיאה לא צפויה במהלך הייצוא';$('cancelExportBtn').textContent='סגירה';notify(e?.message||'שגיאה בייצוא',5000);}else{$('exportTitle').textContent='הייצוא בוטל';$('exportMessage').textContent='הייצוא נעצר לפי בקשתך.';$('cancelExportBtn').textContent='סגירה';}}
-    finally{if(activeExportTimer)clearTimeout(activeExportTimer);if(activeRecorder&&activeRecorder.state!=='inactive'){try{activeRecorder.stop();}catch{}}if(raf)cancelAnimationFrame(raf);try{if(recStream)recStream.getTracks().forEach(t=>t.stop());if(canvasStream)canvasStream.getTracks().forEach(t=>t.stop());if(audioCtx)await audioCtx.close();}catch{}activeRecorder=null;exporting=false;}
+        el.addEventListener('click',e=>{if(e.detail>1)return; seek(start); selectLayer(type,item.id);});track.appendChild(el);});if(!track.dataset.clickBound){track.dataset.clickBound='1';track.addEventListener('dblclick',e=>{if(e.target===track){const rect=track.getBoundingClientRect();seek((e.clientX-rect.left+track.scrollLeft)/pps);}});}});
+    $('playhead').style.left=`${95+state.currentTime*pps}px`;updatePlayhead();}
+  function onResizeMove(e){if(!resizeDrag)return;const c=clipById(resizeDrag.id);if(!c)return;c.duration=Math.max(.25,resizeDrag.duration+(e.clientX-resizeDrag.startX)/resizeDrag.pps);recompute();renderTimeline();draw();}
+  function onResizeEnd(){if(!resizeDrag)return;resizeDrag=null;renderAll();}
+  function selectedClip(){return state.selected.type==='clip'?clipById(state.selected.id):null;}
+  function setTextProp(prop,value){const l=state.selected.type==='text'?textById(state.selected.id):null;if(!l)return;recordHistory();l[prop]=value;draw();renderTimeline();}
+  function applyTextPreset(name){const l=textById(state.selected.id);if(!l||state.selected.type!=='text'){addText(name==='pop'?'וואו. תראו את זה!':'כותרת חדשה',name);return;}recordHistory();Object.assign(l,presetText[name]||{});populateText(l);draw();notify('סגנון הטקסט הוחל');}
+  function applyTemplate(name){recordHistory();const templates={podcast:{content:'רגע, תקשיבו לזה',preset:'pop',y:70},cinema:{content:'הסיפור מתחיל כאן',preset:'clean',y:52},hype:{content:'זה הולך להיות מטורף!',preset:'pop',y:52},quote:{content:'תן לזה לקרות.',preset:'neon',y:50}};const t=templates[name]||templates.podcast;const l=addText(t.content,t.preset);l.y=t.y;renderAll();selectLayer('text',l.id);notify('התבנית נוספה כשכבה ניתנת לעריכה');}
+  function removeSelected(){const {type,id}=state.selected;if(!type||!id)return;recordHistory();if(type==='clip'){state.clips=state.clips.filter(x=>x.id!==id);}else if(type==='text')state.texts=state.texts.filter(x=>x.id!==id);else if(type==='sticker')state.stickers=state.stickers.filter(x=>x.id!==id);else if(type==='audio')state.audios=state.audios.filter(x=>x.id!==id);state.selected={type:'',id:''};recompute();renderAll();selectLayer('','',false);notify('השכבה הוסרה');}
+  function splitSelected(){const c=selectedClip();if(!c){notify('בחר קליפ וידאו כדי לפצל אותו','error');return;}const t=state.currentTime,local=t-c.start;if(local<.2||local>c.duration-.2){notify('נקודת הפיצול קרובה מדי לקצה הקליפ','error');return;}recordHistory();const second={...deep(c),id:uid('clip'),sourceStart:(Number(c.sourceStart)||0)+local*(Number(c.speed)||1),duration:c.duration-local,transition:c.transition==='none'?'fade':c.transition};c.duration=local;state.clips.splice(clipIndex(c.id)+1,0,second);recompute();selectLayer('clip',second.id);renderAll();notify('הקליפ פוצל לשני חלקים');}
+  function updateTransition(type){const c=selectedClip();if(!c){notify('בחר קליפ בציר הזמן לפני בחירת מעבר','error');return;}recordHistory();c.transition=type;c.transitionDuration=Number($('transitionDuration').value)||.6;document.querySelectorAll('[data-transition]').forEach(b=>b.classList.toggle('active',b.dataset.transition===type));populateClip(c);renderTimeline();draw();notify(type==='none'?'המעבר הוסר':`מעבר ${type} הוחל`);}
+  function applyFilter(name){const c=selectedClip();if(!c){notify('בחר קליפ וידאו לפני החלת אפקט','error');return;}recordHistory();c.filter=name;document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('active',b.dataset.filter===name));draw();notify('הפילטר הוחל');}
+  function eventNumber(id,prop,min,max,round=false){const el=$(id);const v=round?Math.round(Number(el.value)):Number(el.value);if(!Number.isFinite(v))return;const obj=selectedLayer();if(!obj)return;recordHistory();obj[prop]=clamp(v,min,max);recompute();draw();renderTimeline();}
+  async function fileToData(file){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});}
+  function dataUrlToFile(dataUrl,name,type){const [meta,b64]=dataUrl.split(',');const mime=(meta.match(/data:(.*?);base64/)||[])[1]||type||'application/octet-stream';const bin=atob(b64);const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);return new File([bytes],name,{type:mime});}
+  async function downloadBlob(blob,name){const native=window.CUTLABNative;if(native&&typeof native.requestSave==='function'&&typeof native.writeChunk==='function'&&typeof native.finishSave==='function'){return new Promise(resolve=>{let settled=false;window.__cutlabNativeSaveReady=async ready=>{if(settled)return;settled=true;window.__cutlabNativeSaveReady=null;if(!ready){resolve(false);return;}try{for(let offset=0;offset<blob.size;offset+=256*1024){const bytes=new Uint8Array(await blob.slice(offset,offset+256*1024).arrayBuffer());let bin='';for(let i=0;i<bytes.length;i++)bin+=String.fromCharCode(bytes[i]);if(!native.writeChunk(btoa(bin)))throw new Error('הכתיבה לקובץ נכשלה');}native.finishSave(true);resolve(true);}catch(e){try{native.finishSave(false);}catch{}notify(e.message||'שמירת הקובץ נכשלה','error');resolve(false);}};try{native.requestSave(name,blob.type||'application/octet-stream');}catch(e){window.__cutlabNativeSaveReady=null;resolve(false);}});}
+    const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);return true;}
+  async function saveProject(){try{notify('אורז את הפרויקט ואת המדיה…');const media=[];for(const m of state.media){if(!m.file)continue;media.push({id:m.id,name:m.name,type:m.type,size:m.size,duration:m.duration,kind:m.kind,data:await fileToData(m.file)});}const data={format:'cutlab-ultra-project',version:1,createdAt:new Date().toISOString(),snapshot:snapshot(),media};const blob=new Blob([JSON.stringify(data)],{type:'application/json'});const saved=await downloadBlob(blob,`${($('projectName').value||'CUTLAB').replace(/[^\w\u0590-\u05FF-]+/g,'_')}.cutlab`);if(saved)notify('הפרויקט נשמר כולל המדיה');}catch(e){console.error(e);notify('לא הצלחתי לארוז את הפרויקט; ייתכן שהוא גדול מדי','error');}}
+  async function openProject(file){try{const p=JSON.parse(await file.text());if(!p||p.format!=='cutlab-ultra-project'||!Array.isArray(p.media))throw new Error('פורמט פרויקט לא תקין');stopPlayback();state.media.forEach(m=>{try{URL.revokeObjectURL(m.url)}catch{}});state.media=[];audioNodes.clear();for(const raw of p.media){const f=dataUrlToFile(raw.data,raw.name,raw.type);const id=raw.id,url=URL.createObjectURL(f),kind=raw.kind;const obj={id,name:raw.name,file:f,url,kind,type:raw.type,size:f.size,duration:raw.duration||5,element:null};if(kind==='image'){const im=new Image();im.src=url;obj.element=im;}else if(kind==='video'){const v=document.createElement('video');v.src=url;v.preload='auto';v.playsInline=true;v.muted=true;v.volume=0;obj.element=v;}else{const a=new Audio(url);a.preload='auto';a.volume=.7;obj.element=a;}state.media.push(obj);}restoreSnapshot(p.snapshot||{});renderAll();notify('הפרויקט והמדיה נטענו בהצלחה');}catch(e){console.error(e);notify(e.message||'לא הצלחתי לפתוח את הפרויקט','error');}}
+  function safeFileName(){return ($('projectName').value||'CUTLAB-VIDEO').trim().replace(/[^\w\u0590-\u05FF-]+/g,'_').slice(0,60)||'CUTLAB-VIDEO';}
+  async function exportVideo(){if(state.exporting)return; if(!state.clips.length){notify('הוסף לפחות קליפ אחד לפני ייצוא','error');return;}if(typeof MediaRecorder==='undefined'||!HTMLCanvasElement.prototype.captureStream){notify('הדפדפן הזה לא תומך בייצוא וידאו. נסה Chrome או Edge מעודכנים.','error');return;}stopPlayback();state.exporting=true;state.exportCancel=false;$('exportModal').classList.remove('hidden');$('exportStatus').textContent='מכין את הסרטון…';$('exportStatusDetail').textContent='מאתחל רינדור בקצב 30 פריימים לשנייה';$('exportProgress').style.width='0%';$('downloadExportBtn').classList.add('hidden');$('exportSpinner').classList.add('spinning');$('cancelExportBtn').classList.remove('hidden');
+    try{await ensureAudio();const d=ratioDims[state.ratio];exportCanvas.width=d[0]*1.5;exportCanvas.height=d[1]*1.5;const stream=exportCanvas.captureStream(0);const exportVideoTrack=stream.getVideoTracks()[0];const hasSoundSources=state.audios.length>0||state.clips.some(c=>mediaById(c.mediaId)?.kind==='video');if(hasSoundSources&&audioDestination)audioDestination.stream.getAudioTracks().forEach(track=>stream.addTrack(track));const types=['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm'];const mime=types.find(t=>MediaRecorder.isTypeSupported(t))||'';exportChunks=[];exportRecorder=new MediaRecorder(stream,mime?{mimeType:mime,videoBitsPerSecond:6000000}:undefined);const stopped=new Promise((resolve,reject)=>{exportRecorder.ondataavailable=e=>{if(e.data&&e.data.size)exportChunks.push(e.data);};exportRecorder.onerror=e=>reject(e.error||new Error('MediaRecorder error'));exportRecorder.onstop=resolve;});
+      const vids=state.media.filter(m=>m.kind==='video');vids.forEach(m=>{m.element.muted=false;m.element.volume=state.muted?0:1;});
+      const start=performance.now(),total=Math.max(.1,state.total);state.exporting=true;exportRecorder.start(250);
+      await new Promise((resolve,reject)=>{let last=performance.now();const render=now=>{if(state.exportCancel){try{exportRecorder.stop();}catch{}return resolve();}const t=Math.min(total,(now-start)/1000);state.currentTime=t;const active=activeClipAt(t);syncPreviewMedia(t,true);state.audios.forEach(a=>{const m=mediaById(a.mediaId);if(!m||m.kind!=='audio')return;const el=m.element;const inRange=t>=a.start&&t<a.start+a.duration;if(inRange){const local=t-a.start;if(Math.abs(el.currentTime-local)>.65){try{el.currentTime=local;}catch{}}el.volume=(state.muted?0:Number(a.volume??70)/100);el.play().catch(()=>{});}else el.pause();});renderTo(exportCtx,t,exportCanvas.width,exportCanvas.height);if(exportVideoTrack&&typeof exportVideoTrack.requestFrame==='function')exportVideoTrack.requestFrame();$('exportProgress').style.width=`${Math.min(100,t/total*100)}%`;$('exportStatus').textContent=`מייצא ${fmt(t)} / ${fmt(total)}`;$('exportStatusDetail').textContent=active?(mediaById(active.mediaId)?.name||'סצנת דוגמה'):'מרנדר שכבות';if(t>=total){$('exportProgress').style.width='100%';setTimeout(()=>{try{exportRecorder.requestData();}catch{}try{exportRecorder.stop();}catch{}resolve();},350);return;}last=now;requestAnimationFrame(render);};requestAnimationFrame(render);});
+      await stopped;state.media.filter(m=>m.kind==='video').forEach(m=>{m.element.pause();m.element.muted=true;m.element.volume=0;});state.audios.forEach(a=>mediaById(a.mediaId)?.element.pause());state.exporting=false;
+      if(state.exportCancel){$('exportStatus').textContent='הייצוא בוטל';$('exportStatusDetail').textContent='אפשר להתחיל ייצוא חדש מתי שתרצה.';return;}
+      const blob=new Blob(exportChunks,{type:exportRecorder.mimeType||'video/webm'});if(!blob.size)throw new Error('לא נוצר קובץ וידאו');if(exportUrl)URL.revokeObjectURL(exportUrl);exportUrl=URL.createObjectURL(blob);$('exportProgress').style.width='100%';$('exportStatus').textContent='הסרטון מוכן!';$('exportStatusDetail').textContent=`${(blob.size/1024/1024).toFixed(1)} MB · WebM · ${(exportCanvas.width)} × ${exportCanvas.height}`;$('exportSpinner').classList.remove('spinning');$('cancelExportBtn').classList.add('hidden');$('downloadExportBtn').classList.remove('hidden');$('downloadExportBtn').onclick=async()=>{const ok=await downloadBlob(blob,`${safeFileName()}.webm`);if(ok)notify('קובץ הווידאו הורד');};notify('הייצוא הסתיים בהצלחה');
+    }catch(e){console.error(e);state.exporting=false;$('exportSpinner').classList.remove('spinning');$('exportStatus').textContent='הייצוא לא הושלם';$('exportStatusDetail').textContent=e.message||'שגיאה בעת יצירת הסרטון';$('cancelExportBtn').textContent='סגירה';notify(`שגיאת ייצוא: ${e.message||'לא ידועה'}`,'error',5000);}
   }
+  function closeExport(){if(state.exporting){state.exportCancel=true;try{exportRecorder?.stop();}catch{};}else $('exportModal').classList.add('hidden');}
 
-  function switchPanel(name){document.querySelectorAll('.rail-btn').forEach(b=>b.classList.toggle('active',b.dataset.panel===name));document.querySelectorAll('.tool-section').forEach(p=>p.classList.toggle('active',p.id==='panel-'+name));}
-  $('importDrop').addEventListener('click',()=>$('fileInput').click());$('startImportBtn').addEventListener('click',()=>$('fileInput').click());$('fileInput').addEventListener('change',async e=>{await addFiles(e.target.files);e.target.value='';});
-  document.querySelectorAll('.rail-btn').forEach(b=>b.addEventListener('click',()=>switchPanel(b.dataset.panel)));
-  $('clearMediaBtn').addEventListener('click',()=>{if(!state.media.size)return;if(!confirm('לנקות את ספריית המדיה ואת ציר הזמן?'))return;for(const m of state.media.values())URL.revokeObjectURL(m.url);state.media.clear();state.clips=[];state.selected=null;state.musicId=null;activeUrl='';renderAll();persistLocal();notify('הספרייה נוקתה');});
-  $('applyTrimBtn').addEventListener('click',applyTrim);$('clipSpeed').addEventListener('change',()=>{const c=getClip();if(!c)return;pushUndo();c.speed=Number($('clipSpeed').value)||1;renderTimeline();updatePreview();persistLocal();});$('clipName').addEventListener('change',()=>{const c=getClip();if(!c)return;pushUndo();c.name=$('clipName').value.trim()||c.name;renderTimeline();persistLocal();});
-  $('applyTextBtn').addEventListener('click',applyText);$('clearTextBtn').addEventListener('click',()=>{const c=getClip();if(!c)return;pushUndo();c.text='';$('clipText').value='';updatePreview();persistLocal();notify('הטקסט הוסר מהקליפ');});$('textSize').addEventListener('input',()=>{$('textSizeValue').textContent=$('textSize').value;const c=getClip();if(c){c.textSize=Number($('textSize').value);updatePreview();}});
-  document.querySelectorAll('.filter-option').forEach(b=>b.addEventListener('click',()=>{const c=getClip();if(!c)return pushNoticeNoClip();pushUndo();c.filter=b.dataset.filter;applyLiveFilter();updatePreview();document.querySelectorAll('.filter-option').forEach(x=>x.classList.toggle('selected',x===b));persistLocal();}));
-  $('chooseMusicBtn').addEventListener('click',()=>$('musicInput').click());$('musicInput').addEventListener('change',async e=>{const file=e.target.files?.[0];if(file){const m=await registerMedia(file);if(m){state.musicId=m.id;renderMediaList();updateMusicPanel();renderTimeline();persistLocal();notify('מוזיקת הרקע נבחרה');}}e.target.value='';});$('musicVolume').addEventListener('input',()=>{state.musicVolume=Number($('musicVolume').value)/100;$('musicVolumeValue').textContent=$('musicVolume').value+'%';renderTimeline();persistLocal();});$('clipVolume').addEventListener('input',()=>{const c=getClip();if(c){c.volume=Number($('clipVolume').value)/100;$('clipVolumeValue').textContent=$('clipVolume').value+'%';persistLocal();}});$('removeMusicBtn').addEventListener('click',()=>{state.musicId=null;updateMusicPanel();renderMediaList();renderTimeline();persistLocal();notify('מוזיקת הרקע הוסרה');});
-  ['brightness','contrast','saturation'].forEach(id=>$(id).addEventListener('input',()=>{const c=getClip();const value=Number($(id).value)/100;$(id+'Value').textContent=$(''+id).value+'%';if(c){c[id]=value;applyLiveFilter();persistLocal();}}));
-  $('resetAdjustBtn').addEventListener('click',()=>{const c=getClip();if(!c)return;pushUndo();c.brightness=c.contrast=c.saturation=1;c.filter='none';state.brightness=state.contrast=state.saturation=1;updateClipControls();updatePreview();persistLocal();notify('ההתאמות אופסו');});
-  $('aspectRatio').addEventListener('change',()=>{state.ratio=$('aspectRatio').value;updatePreview();renderTimeline();persistLocal();});$('fitMode').addEventListener('change',()=>{state.fit=$('fitMode').value;updatePreview();persistLocal();});
-  $('splitBtn').addEventListener('click',splitClip);$('duplicateBtn').addEventListener('click',duplicateClip);$('deleteClipBtn').addEventListener('click',deleteClip);$('undoBtn').addEventListener('click',undo);$('redoBtn').addEventListener('click',redo);$('exportBtn').addEventListener('click',runExport);$('saveProjectBtn').addEventListener('click',exportProject);$('openProjectBtn').addEventListener('click',()=>$('projectInput').click());$('projectInput').addEventListener('change',async e=>{if(e.target.files?.[0])await importProjectFile(e.target.files[0]);e.target.value='';});
-  $('cancelExportBtn').addEventListener('click',()=>{if(exporting){cancelExport=true;if(activeRecorder&&activeRecorder.state!=='inactive'){try{activeRecorder.stop();}catch{}}return;} $('exportModal').hidden=true;});
-  $('playBtn').addEventListener('click',async()=>{const c=getClip(),m=c&&getMedia(c.mediaId);if(!c||!m)return pushNoticeNoClip();if(m.kind==='image')return notify('תמונות יוצגו בתצוגה וייכללו בייצוא');const v=$('previewVideo');if(v.paused){if(v.currentTime<c.inPoint||v.currentTime>=c.outPoint)v.currentTime=c.inPoint;try{await v.play();}catch{notify('לחץ ישירות על הסרטון להפעלה');}}else v.pause();});
-  $('jumpStartBtn').addEventListener('click',()=>{const c=getClip();if(!c)return;const v=$('previewVideo');if(getMedia(c.mediaId)?.kind==='video')v.currentTime=c.inPoint;window.previewCurrentTime=timelineOffset(c);renderTimeline();});$('jumpEndBtn').addEventListener('click',()=>{const c=getClip();if(!c)return;const v=$('previewVideo');if(getMedia(c.mediaId)?.kind==='video')v.currentTime=Math.max(c.inPoint,c.outPoint-.1);});
-  $('previewVideo').addEventListener('timeupdate',()=>{const c=getClip();if(!c)return;updatePlayhead();if($('previewVideo').currentTime>=c.outPoint-.03&&!$('previewVideo').paused){$('previewVideo').pause();const i=state.clips.findIndex(x=>x.id===c.id);if(i>=0&&i<state.clips.length-1){selectClip(state.clips[i+1].id);const nc=getClip();if(nc&&getMedia(nc.mediaId)?.kind==='video'){$('previewVideo').currentTime=nc.inPoint;$('previewVideo').play().catch(()=>{});}}}});$('previewVideo').addEventListener('play',()=>{$('playBtn').textContent='Ⅱ';});$('previewVideo').addEventListener('pause',()=>{$('playBtn').textContent='▶';});
-  $('playbackZoom').addEventListener('input',()=>{state.zoom=Number($('playbackZoom').value);renderTimeline();});$('mutePreviewBtn').addEventListener('click',()=>{previewMuted=!previewMuted;$('previewVideo').muted=previewMuted;$('mutePreviewBtn').textContent=previewMuted?'×♫':'♫';});$('fitStageBtn').addEventListener('click',()=>{$('previewFrame').classList.toggle('expanded');notify('יחס התצוגה נקבע לפי יחס המסך שנבחר בכלים');});$('previewZone').addEventListener('dragover',e=>{e.preventDefault();$('importDrop').style.borderColor='#b7a0ff';});$('previewZone').addEventListener('dragleave',()=>$('importDrop').style.borderColor='');$('previewZone').addEventListener('drop',async e=>{e.preventDefault();$('importDrop').style.borderColor='';await addFiles(e.dataTransfer.files);});
-  window.addEventListener('beforeunload',()=>{try{if(activeRecorder&&activeRecorder.state!=='inactive')activeRecorder.stop();}catch{}});
-  renderAll();restoreLocal();
+  function textPointerDown(e){if(state.selected.type!=='text')return;const l=textById(state.selected.id);if(!l)return;const r=canvas.getBoundingClientRect();stageDrag={id:l.id,startX:e.clientX,startY:e.clientY,origX:l.x,origY:l.y,w:r.width,h:r.height};canvas.style.cursor='grabbing';}
+  function textPointerMove(e){if(!stageDrag)return;const l=textById(stageDrag.id);if(!l)return;const rect=canvas.getBoundingClientRect();l.x=clamp(stageDrag.origX+(e.clientX-stageDrag.startX)/rect.width*100,2,98);l.y=clamp(stageDrag.origY+(e.clientY-stageDrag.startY)/rect.height*100,2,98);$('textX').value=l.x;$('textY').value=l.y;draw();renderTimeline();}
+  function textPointerUp(){if(stageDrag){stageDrag=null;canvas.style.cursor='default';recordHistory();}}
+  function pickTextAt(e){const rect=canvas.getBoundingClientRect(),x=(e.clientX-rect.left)/rect.width*100,y=(e.clientY-rect.top)/rect.height*100;const visible=state.texts.filter(l=>state.currentTime>=l.start&&state.currentTime<=l.start+l.duration);const match=visible.slice().reverse().find(l=>Math.abs(l.x-x)<40&&Math.abs(l.y-y)<18);if(match){selectLayer('text',match.id);return true;}return false;}
+
+  // Wiring: project and media controls
+  document.querySelectorAll('.rail-tool[data-panel]').forEach(b=>b.addEventListener('click',()=>setPanel(b.dataset.panel)));
+  $('collapsePanel').addEventListener('click',()=>{$('toolPanel').classList.toggle('collapsed');setTimeout(fitStage,100);});
+  $('importBtn').addEventListener('click',()=>$('fileInput').click());$('importAudioBtn').addEventListener('click',()=>$('fileInput').click());$('fileInput').addEventListener('change',e=>{importFiles(e.target.files);e.target.value='';});
+  $('dropzone').addEventListener('dragover',e=>{e.preventDefault();$('dropzone').classList.add('dragover');});$('dropzone').addEventListener('dragleave',()=>$('dropzone').classList.remove('dragover'));$('dropzone').addEventListener('drop',e=>{e.preventDefault();$('dropzone').classList.remove('dragover');importFiles(e.dataTransfer.files);});$('dropzone').addEventListener('keydown',e=>{if(e.key==='Enter')$('fileInput').click();});
+  $('addDemoBtn').addEventListener('click',()=>addDemoClip(state.clips.length%3));$('addAudioDemoBtn').addEventListener('click',()=>{notify('כדי להוסיף מוזיקה אמיתית, ייבא קובץ MP3 או WAV.','error',3500);setPanel('media');$('fileInput').click();});
+  $('addTextBtn').addEventListener('click',()=>addText());$('addCaptionBtn').addEventListener('click',()=>addText('ככה תופסים את העין','pop'));
+  $('inspectorAddTextBtn').addEventListener('click',()=>addText());document.querySelectorAll('[data-text-preset]').forEach(b=>b.addEventListener('click',()=>applyTextPreset(b.dataset.textPreset)));
+  document.querySelectorAll('[data-transition]').forEach(b=>b.addEventListener('click',()=>updateTransition(b.dataset.transition)));$('transitionDuration').addEventListener('input',()=>{$('transitionDurationLabel').textContent=`${Number($('transitionDuration').value).toFixed(2)} שנ׳`;const c=selectedClip();if(c){c.transitionDuration=Number($('transitionDuration').value);draw();renderTimeline();}});$('transitionDuration').addEventListener('change',recordHistory);
+  document.querySelectorAll('[data-filter]').forEach(b=>b.addEventListener('click',()=>applyFilter(b.dataset.filter)));
+  document.querySelectorAll('[data-template]').forEach(b=>b.addEventListener('click',()=>applyTemplate(b.dataset.template)));document.querySelectorAll('[data-sticker]').forEach(b=>b.addEventListener('click',()=>addSticker(b.dataset.sticker)));
+  $('playBtn').addEventListener('click',()=>state.playing?stopPlayback():play());$('goStartBtn').addEventListener('click',()=>{stopPlayback();seek(0);});$('goEndBtn').addEventListener('click',()=>{stopPlayback();seek(state.total);});$('muteBtn').addEventListener('click',()=>{state.muted=!state.muted;$('muteBtn').classList.toggle('active',state.muted);$('muteBtn').textContent=state.muted?'×♫':'♫';notify(state.muted?'התצוגה הושתקה':'ההשתקה בוטלה');});$('loopBtn').addEventListener('click',()=>$('loopBtn').classList.toggle('active'));$('speedBtn').addEventListener('click',()=>{const speeds=[.5,1,1.25,1.5,2];state.speed=speeds[(speeds.indexOf(state.speed)+1)%speeds.length];$('speedBtn').textContent=`${state.speed}×`;});
+  $('ratioBtn').addEventListener('click',()=>$('ratioModal').classList.remove('hidden'));$('closeRatioModal').addEventListener('click',()=>$('ratioModal').classList.add('hidden'));document.querySelectorAll('[data-ratio]').forEach(b=>b.addEventListener('click',()=>{recordHistory();state.ratio=b.dataset.ratio;applyRatio();document.querySelectorAll('[data-ratio]').forEach(x=>x.classList.toggle('active',x===b));$('ratioModal').classList.add('hidden');renderAll();}));$('fullscreenBtn').addEventListener('click',()=>{if(document.fullscreenElement)document.exitFullscreen?.();else $('stageWorkspace').requestFullscreen?.();});$('zoomInBtn').addEventListener('click',()=>{state.stageZoom=clamp(state.stageZoom+10,60,130);fitStage();});$('zoomOutBtn').addEventListener('click',()=>{state.stageZoom=clamp(state.stageZoom-10,60,130);fitStage();});$('safeAreaBtn').addEventListener('click',()=>{$('safeGuides').classList.toggle('hidden');state.showSafe=!state.showSafe;});$('gridBtn').addEventListener('click',()=>{$('gridGuides').classList.toggle('hidden');state.showGrid=!state.showGrid;});
+  $('timelineZoom').addEventListener('input',()=>{state.zoom=Number($('timelineZoom').value);renderTimeline();});$('timelineZoomIn').addEventListener('click',()=>{$('timelineZoom').value=state.zoom=clamp(state.zoom+8,36,130);renderTimeline();});$('timelineZoomOut').addEventListener('click',()=>{$('timelineZoom').value=state.zoom=clamp(state.zoom-8,36,130);renderTimeline();});$('fitTimelineBtn').addEventListener('click',()=>{$('timelineZoom').value=state.zoom=clamp(780/Math.max(state.total,1),36,130);renderTimeline();});$('timelineScroll').addEventListener('click',e=>{if(e.target.closest('.timeline-clip')||e.target.closest('.clip-resize'))return;const rect=e.currentTarget.getBoundingClientRect();const t=(e.clientX-rect.left+e.currentTarget.scrollLeft-95)/(Number(state.zoom)||64);if(t>=0)seek(t);});$('rulerScroll').addEventListener('click',e=>{const rect=e.currentTarget.getBoundingClientRect();seek((e.clientX-rect.left-95)/(Number(state.zoom)||64));});$('splitBtn').addEventListener('click',splitSelected);$('deleteTimelineBtn').addEventListener('click',removeSelected);$('deleteLayerBtn').addEventListener('click',removeSelected);$('deleteStickerBtn').addEventListener('click',removeSelected);$('deleteAudioBtn').addEventListener('click',removeSelected);$('duplicateClipBtn').addEventListener('click',()=>{const c=selectedClip();if(!c)return;recordHistory();const d={...deep(c),id:uid('clip')};state.clips.splice(clipIndex(c.id)+1,0,d);recompute();selectLayer('clip',d.id);renderAll();notify('הקליפ שוכפל');});
+  $('saveProjectBtn').addEventListener('click',saveProject);$('openProjectBtn').addEventListener('click',()=>$('projectInput').click());$('projectInput').addEventListener('change',e=>{if(e.target.files?.[0])openProject(e.target.files[0]);e.target.value='';});$('exportBtn').addEventListener('click',exportVideo);$('closeExportModal').addEventListener('click',closeExport);$('cancelExportBtn').addEventListener('click',closeExport);$('closeHelpModal').addEventListener('click',()=>$('helpModal').classList.add('hidden'));$('closeHelpOk').addEventListener('click',()=>$('helpModal').classList.add('hidden'));$('helpBtn').addEventListener('click',()=>$('helpModal').classList.remove('hidden'));$('closeHelpModal').addEventListener('click',()=>$('helpModal').classList.add('hidden'));
+  $('projectName').addEventListener('input',()=>{$('currentWorkspaceName').textContent='עורך וידאו';$('saveState').textContent='יש שינויים בפרויקט';});
+
+  // Text controls update the real canvas, not a fake preview.
+  $('textContent').addEventListener('input',e=>{const l=textById(state.selected.id);if(!l)return;l.content=e.target.value;draw();renderTimeline();});$('textContent').addEventListener('change',recordHistory);
+  $('fontFamily').addEventListener('change',e=>setTextProp('font',e.target.value));$('fontSize').addEventListener('change',e=>eventNumber('fontSize','size',12,180,true));$('boldBtn').addEventListener('click',()=>{const l=textById(state.selected.id);if(l){recordHistory();l.bold=!l.bold;populateText(l);draw();}});$('italicBtn').addEventListener('click',()=>{const l=textById(state.selected.id);if(l){recordHistory();l.italic=!l.italic;populateText(l);draw();}});$('upperBtn').addEventListener('click',()=>{const l=textById(state.selected.id);if(l){recordHistory();l.upper=!l.upper;l.content=l.upper?l.content.toUpperCase():l.content.toLowerCase();$('textContent').value=l.content;populateText(l);draw();}});
+  document.querySelectorAll('[data-align]').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('[data-align]').forEach(x=>x.classList.toggle('active',x===b));setTextProp('align',b.dataset.align);}));$('gradientToggle').addEventListener('change',e=>setTextProp('gradient',e.target.checked));$('textColor').addEventListener('input',e=>setTextProp('color',e.target.value));$('textColor2').addEventListener('input',e=>setTextProp('color2',e.target.value));$('textBackground').addEventListener('change',e=>setTextProp('background',e.target.value));$('outlineToggle').addEventListener('change',e=>setTextProp('outline',e.target.checked));$('backgroundColor').addEventListener('input',e=>setTextProp('bgColor',e.target.value));$('outlineColor').addEventListener('input',e=>setTextProp('outlineColor',e.target.value));$('shadowColor').addEventListener('input',e=>setTextProp('shadowColor',e.target.value));$('outlineWidth').addEventListener('input',e=>{setTextProp('outlineWidth',Number(e.target.value));$('outlineWidthLabel').textContent=e.target.value;});$('shadowBlur').addEventListener('input',e=>{setTextProp('shadowBlur',Number(e.target.value));$('shadowBlurLabel').textContent=e.target.value;});$('textIn').addEventListener('change',e=>setTextProp('animIn',e.target.value));$('textOut').addEventListener('change',e=>setTextProp('animOut',e.target.value));$('textStart').addEventListener('change',e=>eventNumber('textStart','start',0,state.total,false));$('textDuration').addEventListener('change',e=>eventNumber('textDuration','duration',.1,300,false));$('textX').addEventListener('input',e=>{const l=textById(state.selected.id);if(l){l.x=Number(e.target.value);draw();}});$('textX').addEventListener('change',recordHistory);$('textY').addEventListener('input',e=>{const l=textById(state.selected.id);if(l){l.y=Number(e.target.value);draw();}});$('textY').addEventListener('change',recordHistory);$('textRotation').addEventListener('input',e=>{const l=textById(state.selected.id);if(l){l.rotation=Number(e.target.value);$('textRotationLabel').textContent=`${l.rotation}°`;draw();}});$('textRotation').addEventListener('change',recordHistory);$('textScale').addEventListener('input',e=>{const l=textById(state.selected.id);if(l){l.scale=Number(e.target.value);draw();}});$('textScale').addEventListener('change',recordHistory);$('centerTextBtn').addEventListener('click',()=>{const l=textById(state.selected.id);if(l){recordHistory();l.x=50;l.y=52;populateText(l);draw();}});
+  $('clipStart').addEventListener('change',e=>{const c=selectedClip();if(c){recordHistory();c.sourceStart=clamp(Number(e.target.value)||0,0,Math.max(0,(mediaById(c.mediaId)?.duration||c.duration)-.1));draw();}});$('clipDuration').addEventListener('change',e=>{const c=selectedClip();if(c){recordHistory();c.duration=clamp(Number(e.target.value)||1,.2,300);recompute();renderAll();}});$('clipSpeed').addEventListener('input',e=>{const c=selectedClip();if(c){c.speed=Number(e.target.value);$('clipSpeedLabel').textContent=`${c.speed.toFixed(2)}×`;draw();}});$('clipSpeed').addEventListener('change',recordHistory);$('clipFit').addEventListener('change',e=>{const c=selectedClip();if(c){recordHistory();c.fit=e.target.value;draw();}});$('clipVolume').addEventListener('input',e=>{const c=selectedClip();if(c)c.volume=Number(e.target.value);});$('clipVolume').addEventListener('change',recordHistory);$('clipTransition').addEventListener('change',e=>{const c=selectedClip();if(c){recordHistory();c.transition=e.target.value;renderTimeline();draw();document.querySelectorAll('[data-transition]').forEach(b=>b.classList.toggle('active',b.dataset.transition===c.transition));}});$('clipBrightness').addEventListener('input',e=>{const c=selectedClip();if(c){c.brightness=Number(e.target.value);$('clipBrightnessLabel').textContent=`${c.brightness}%`;draw();}});$('clipBrightness').addEventListener('change',recordHistory);
+  $('stickerContent').addEventListener('input',e=>{const s=stickerById(state.selected.id);if(s){s.content=e.target.value;draw();renderTimeline();}});$('stickerContent').addEventListener('change',recordHistory);$('stickerSize').addEventListener('input',e=>{const s=stickerById(state.selected.id);if(s){s.size=Number(e.target.value);draw();}});$('stickerSize').addEventListener('change',recordHistory);$('stickerX').addEventListener('input',e=>{const s=stickerById(state.selected.id);if(s){s.x=Number(e.target.value);draw();}});$('stickerX').addEventListener('change',recordHistory);$('stickerY').addEventListener('input',e=>{const s=stickerById(state.selected.id);if(s){s.y=Number(e.target.value);draw();}});$('stickerY').addEventListener('change',recordHistory);$('stickerStart').addEventListener('change',e=>eventNumber('stickerStart','start',0,state.total));$('stickerDuration').addEventListener('change',e=>eventNumber('stickerDuration','duration',.1,300));
+  $('audioStart').addEventListener('change',e=>eventNumber('audioStart','start',0,300));$('audioDuration').addEventListener('change',e=>eventNumber('audioDuration','duration',.1,300));$('audioVolume').addEventListener('input',e=>{const a=audioById(state.selected.id);if(a){a.volume=Number(e.target.value);$('audioVolumeLabel').textContent=`${a.volume}%`;}});$('audioVolume').addEventListener('change',recordHistory);
+  ['brightness','contrast','saturation'].forEach(name=>$(name).addEventListener('input',e=>{const c=selectedClip();if(c){c[name]=Number(e.target.value);$(name+'Label').textContent=`${e.target.value}%`;draw();}}));
+  canvas.addEventListener('pointerdown',e=>{if(state.selected.type==='text')textPointerDown(e);});canvas.addEventListener('pointermove',textPointerMove);canvas.addEventListener('pointerup',textPointerUp);canvas.addEventListener('pointercancel',textPointerUp);canvas.addEventListener('click',e=>{if(state.selected.type==='text'&&!stageDrag)return;if(pickTextAt(e))return;});
+  document.addEventListener('pointermove',onResizeMove);document.addEventListener('pointerup',onResizeEnd);
+  document.addEventListener('keydown',e=>{const tag=(e.target?.tagName||'').toLowerCase();if(['input','textarea','select'].includes(tag))return;if(e.code==='Space'){e.preventDefault();state.playing?stopPlayback():play();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();undo();}if((e.ctrlKey||e.metaKey)&&(e.key.toLowerCase()==='y'||e.shiftKey&&e.key.toLowerCase()==='z')){e.preventDefault();redo();}if(e.key==='Delete'||e.key==='Backspace'){if(state.selected.type){e.preventDefault();removeSelected();}}if(e.key==='Escape'){document.querySelectorAll('.modal-backdrop').forEach(m=>m.classList.add('hidden'));}});
+  window.addEventListener('resize',()=>{fitStage();draw();});
+  window.addEventListener('beforeunload',()=>{stopPlayback();if(exportUrl)URL.revokeObjectURL(exportUrl);});
+
+  // Make the first view feel like a real editing project, not a blank shell.
+  const demo={id:uid('clip'),mediaId:'demo',kind:'demo',duration:8,sourceStart:0,speed:1,volume:0,transition:'none',transitionDuration:.7,filter:'none',brightness:100,contrast:100,saturation:100,fit:'cover',demoHue:0};state.clips.push(demo);
+  const lead={id:uid('text'),content:'הסיפור שלך\nמתחיל כאן',kind:'text',start:0,duration:5.4,x:50,y:76,size:54,font:'Arial Black',bold:true,italic:false,upper:false,align:'center',color:'#ffffff',color2:'#91f4e2',gradient:true,background:'glass',bgColor:'#171526',bgOpacity:76,outline:true,outlineColor:'#21172f',outlineWidth:2,shadowColor:'#10091d',shadowBlur:18,animIn:'pop',animOut:'fade',scale:100,rotation:-1};state.texts.push(lead);
+  const sticker={id:uid('sticker'),content:'✦',kind:'sticker',start:.1,duration:6,x:79,y:22,size:76,rotation:10};state.stickers.push(sticker);
+  applyRatio();setPanel('media');renderAll();selectLayer('text',lead.id,false);recordHistory();updateUndoButtons();$('stageHint').textContent='תצוגה חיה · גרור טקסט כדי למקם';$('stageHint').style.opacity='.7';setTimeout(()=>$('stageHint').style.opacity='0',3500);
 })();
