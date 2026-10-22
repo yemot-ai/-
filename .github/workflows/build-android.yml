@@ -49,17 +49,19 @@ jobs:
           node - <<'NODE'
           const fs = require('node:fs');
           const html = fs.readFileSync('index.html', 'utf8');
-          const scripts = [...html.matchAll(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi)];
-          if (scripts.length !== 1) throw new Error('Expected exactly one inline editor script');
           const lower = html.toLowerCase();
+          const scriptOpen = lower.indexOf('<script>');
+          const scriptClose = lower.indexOf('</script>', scriptOpen);
           const bodyOpen = lower.indexOf('<body');
           const bodyClose = lower.lastIndexOf('</body>');
-          const scriptOpen = lower.indexOf(scripts[0][0].toLowerCase());
           const canvasOpen = lower.indexOf('id="previewcanvas"');
+          if (scriptOpen < 0 || scriptClose < 0 || lower.indexOf('<script', scriptOpen + 1) >= 0) {
+            throw new Error('Expected exactly one inline editor script');
+          }
           if (bodyOpen < 0 || bodyClose < 0 || canvasOpen < bodyOpen || scriptOpen < canvasOpen || scriptOpen > bodyClose) {
             throw new Error('Editor script must execute after the preview canvas is present in the document');
           }
-          fs.writeFileSync('/tmp/cutlab-inline-check.js', scripts[0][1]);
+          fs.writeFileSync('/tmp/cutlab-inline-check.js', html.slice(scriptOpen + 8, scriptClose));
           NODE
           node --check /tmp/cutlab-inline-check.js
       - name: Set up JDK 17
