@@ -13,3 +13,8 @@
 .transition-card .blur-demo{background:linear-gradient(135deg,#16294b,#24d8c8);filter:blur(.2px)}.transition-card .circle-demo{background:radial-gradient(circle,#ffd45e 0 22%,#24d8c8 23% 48%,#122845 49%)}.transition-card .shutter-demo{background:repeating-linear-gradient(90deg,#24d8c8 0 5px,#122845 5px 10px)}.transition-card .crosszoom-demo{background:radial-gradient(circle,#ffd45e,#24d8c8 35%,#152541)}.transition-card .flip-demo{background:linear-gradient(180deg,#ffd45e 0 50%,#24d8c8 50%)}
 .filter-warm{background:linear-gradient(135deg,#8b4d30,#ffd45e)}.filter-cold{background:linear-gradient(135deg,#14274a,#69caee)}.filter-film{background:linear-gradient(135deg,#4b3e30,#b5a178)}.filter-noir{background:linear-gradient(135deg,#05070d,#89909b)}.filter-pastel{background:linear-gradient(135deg,#f0b9c7,#9bcae7)}.filter-cyber{background:linear-gradient(135deg,#ff49cb,#29f3d1)}.filter-faded{background:linear-gradient(135deg,#9d9f91,#d2d2b4)}.filter-amber{background:linear-gradient(135deg,#4a2b16,#e9a746)}
 @media(max-width:1000px){.emoji-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.theme-preset-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+.style-preset.preset-gold{background:linear-gradient(135deg,#102744,#174b5d 55%,#5b4a21);border-color:#b7ab52;color:#ffe38a}
+.style-preset.preset-subtitle{background:linear-gradient(135deg,#09172c,#203a58);border-color:#3e5875;color:#f4f8ff}
+.style-preset.preset-retro{background:linear-gradient(135deg,#36223a,#925b3f 60%,#d4a35e);border-color:#bb8c55;color:#ffe2a8}
+.style-preset.preset-impact{background:linear-gradient(135deg,#08172c,#0f5361 60%,#806629);border-color:#24d8c8;color:#ffffff}
