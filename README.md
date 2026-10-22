@@ -3,7 +3,7 @@
 עורך סושיאל בעברית עם ציר זמן רב-שכבתי, עריכת טקסט מתקדמת, מעברים, פילטרים, מדבקות, אודיו, שמירת פרויקט וייצוא WebM.
 
 ## תצוגה בדפדפן
-[פתח את CUTLAB Studio Ultra במחשב](https://htmlpreview.github.io/?https://github.com/yemot-ai/-/blob/main/CUTLAB_STUDIO_ULTRA.html)
+[פתח את CUTLAB Studio Ultra במחשב](https://raw.githack.com/yemot-ai/-/24505a5699b1d882b33475ca12ef3c8004857b1c/index.html)
 
 אפשר גם להוריד את קובץ `CUTLAB_STUDIO_ULTRA.html` ולפתוח אותו ב-Chrome/Edge, או להוריד את חבילת המקור ולפתוח את `index.html`.
 
