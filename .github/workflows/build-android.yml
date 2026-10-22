@@ -37,8 +37,13 @@ jobs:
           test -s app.css
           test -s app.js
           test -s app/src/main/java/com/yemotai/videostudio/MainActivity.kt
-          grep -q 'href="app.css"' index.html
-          grep -q 'src="app.js"' index.html
+          grep -q '<script' index.html
+          grep -q '<style' index.html
+      - name: Package standalone editor into Android assets
+        run: |
+          mkdir -p app/src/main/assets
+          cp index.html app/src/main/assets/index.html
+          test -s app/src/main/assets/index.html
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -55,6 +60,7 @@ jobs:
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
           unzip -t "$APK" | tail -n 1
+          unzip -l "$APK" | grep -q 'assets/index.html'
           SIGNER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -type f -name apksigner 2>/dev/null | sort | tail -n 1)"
           if [ -n "$SIGNER" ]; then "$SIGNER" verify --verbose "$APK"; fi
           ls -lh "$APK"
