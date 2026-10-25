@@ -18,3 +18,54 @@
 .style-preset.preset-subtitle{background:linear-gradient(135deg,#09172c,#203a58);border-color:#3e5875;color:#f4f8ff}
 .style-preset.preset-retro{background:linear-gradient(135deg,#36223a,#925b3f 60%,#d4a35e);border-color:#bb8c55;color:#ffe2a8}
 .style-preset.preset-impact{background:linear-gradient(135deg,#08172c,#0f5361 60%,#806629);border-color:#24d8c8;color:#ffffff}
+
+/* Mobile canvas-first layout: keep the creation preview visible before tool panels. */
+@media (max-width: 1010px) {
+  html, body { width: 100%; overflow-x: hidden; }
+  body { overflow-y: auto; }
+  .app-shell { height: auto; min-height: 100vh; min-height: 100dvh; overflow: visible; }
+  .workspace {
+    display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+    width: 100%; min-width: 0; min-height: 0; padding: 0 8px 18px; overflow: visible;
+  }
+  .editor-area {
+    order: 0; grid-column: auto; grid-row: auto; width: 100%; min-width: 0;
+    min-height: 0; overflow: visible;
+  }
+  .editor-toolbar { height: auto; min-height: 45px; flex-wrap: wrap; gap: 8px; padding: 8px; }
+  .toolbar-right { flex-wrap: wrap; }
+  .stage-and-props { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: visible; }
+  .stage-column { width: 100%; min-width: 0; min-height: 0; }
+  .stage-workspace {
+    flex: 0 0 auto; height: 56vh; height: 56dvh;
+    min-height: 280px; max-height: 520px; padding: 8px;
+  }
+  .stage-frame { max-width: 100%; max-height: 100%; }
+  .inspector { width: 100%; max-height: none; overflow: visible; }
+  .timeline-panel { height: 250px; flex-basis: 250px; min-height: 250px; }
+  .tool-rail {
+    order: 1; grid-column: auto; grid-row: auto; display: flex; flex-direction: row;
+    align-items: stretch; width: 100%; min-width: 0; overflow-x: auto; overflow-y: hidden;
+    padding: 8px; gap: 6px; border: 1px solid #292a38; border-radius: 12px;
+    scrollbar-width: thin;
+  }
+  .rail-spacer { display: none; }
+  .rail-tool { flex: 0 0 56px; width: 56px; min-width: 56px; height: 50px; padding: 5px 2px; }
+  .tool-panel {
+    order: 2; grid-column: auto; grid-row: auto; width: 100%; min-width: 0;
+    max-height: none; min-height: 0; border: 1px solid #292a38; border-radius: 14px;
+    padding: 12px; overflow: visible;
+  }
+}
+@media (max-width: 670px) {
+  .workspace { gap: 8px; padding: 0 6px 14px; }
+  .editor-area { min-height: 0; }
+  .editor-toolbar { align-items: flex-start; }
+  .crumbs, .toolbar-right { max-width: 100%; }
+  .stage-header { flex-wrap: wrap; gap: 6px; padding: 8px; }
+  .stage-options { flex-wrap: wrap; }
+  .stage-workspace { height: 52vh; height: 52dvh; min-height: 250px; max-height: 440px; }
+  .stage-column { min-height: 0; }
+  .playback-controls { flex-wrap: wrap; gap: 8px; padding: 8px; }
+  .timeline-panel { height: 245px; flex-basis: 245px; }
+}

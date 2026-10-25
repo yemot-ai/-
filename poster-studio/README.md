@@ -7,6 +7,9 @@
 
 אפשר גם להוריד את \`index.html\` ולפתוח אותו ב-Chrome או Edge. אין צורך בהתקנה או בהרשמה.
 
+## Mobile preview fix
+The editor preview is placed first on small screens; tool panels follow it, so the current design remains visible without needing to scroll past the controls first. The canvas size adapts to the mobile viewport.
+
 ## Android APK
 קובץ APK נבנה אוטומטית באמצעות GitHub Actions. פתחו את לשונית Actions במאגר, בחרו את הריצה האחרונה של **Build Poster Studio Offline Android APK**, והורידו את artifact בשם \`POSTER-STUDIO-Android-APK\`. לאחר חילוץ ה-ZIP, התקינו את \`app-debug.apk\`.
 
