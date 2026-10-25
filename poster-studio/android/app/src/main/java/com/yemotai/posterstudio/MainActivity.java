@@ -1,6 +1,7 @@
 package com.yemotai.posterstudio;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
@@ -11,7 +12,9 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.JavascriptInterface;
+import android.webkit.JsPromptResult;
 import android.widget.Toast;
+import android.widget.EditText;
 import java.io.OutputStream;
 
 public class MainActivity extends Activity {
@@ -41,11 +44,37 @@ public class MainActivity extends Activity {
             @Override public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback, FileChooserParams params) {
                 if (fileChooserCallback != null) fileChooserCallback.onReceiveValue(null);
                 fileChooserCallback = callback;
+                boolean wantsProject = false;
+                String[] accepted = params.getAcceptTypes();
+                if (accepted != null) {
+                    for (String type : accepted) {
+                        if (type != null && (type.contains("json") || type.contains("posterproject"))) wantsProject = true;
+                    }
+                }
                 Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
                 intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("image/*");
+                if (wantsProject) {
+                    intent.setType("*/*");
+                    intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"application/json", "text/plain", "application/octet-stream"});
+                } else {
+                    intent.setType("image/*");
+                }
                 try { startActivityForResult(intent, REQUEST_OPEN); }
                 catch (Exception ex) { fileChooserCallback = null; Toast.makeText(MainActivity.this, "לא ניתן לפתוח בורר קבצים", Toast.LENGTH_SHORT).show(); return false; }
+                return true;
+            }
+
+            @Override public boolean onJsPrompt(WebView view, String url, String message, String defaultValue, JsPromptResult result) {
+                EditText input = new EditText(MainActivity.this);
+                input.setSingleLine(true);
+                input.setText(defaultValue == null ? "" : defaultValue);
+                new AlertDialog.Builder(MainActivity.this)
+                    .setTitle(message == null ? "שם הפרויקט" : message)
+                    .setView(input)
+                    .setPositiveButton("שמור", (dialog, which) -> result.confirm(input.getText().toString()))
+                    .setNegativeButton("ביטול", (dialog, which) -> result.cancel())
+                    .setOnCancelListener(dialog -> result.cancel())
+                    .show();
                 return true;
             }
         });
