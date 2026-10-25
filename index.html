@@ -81,6 +81,31 @@
   .playback-controls { flex-wrap: wrap; gap: 8px; padding: 8px; }
   .timeline-panel { height: 245px; flex-basis: 245px; }
 }
+
+/* Mobile export dialog: keep every control, especially the download button, reachable. */
+#exportModal{overflow-y:auto;overscroll-behavior:contain;align-items:center;padding: max(10px, env(safe-area-inset-top)) 12px max(12px, env(safe-area-inset-bottom));}
+#exportModal .modal-card{width:min(490px,100%);max-height:calc(100dvh - 24px);overflow-y:auto;overscroll-behavior:contain;padding:clamp(14px,3.5vw,22px);margin:auto;scrollbar-width:thin;}
+#exportModal .modal-head{margin-bottom:12px;}
+#exportModal .export-preview{padding:clamp(12px,3vh,25px);gap:8px;}
+#exportModal .export-spinner{width:46px;height:46px;flex:0 0 46px;}
+#exportModal .export-options{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;margin-top:12px;}
+#exportModal .export-options label{min-width:0;display:flex;flex-direction:column;gap:7px;font-size:11px;}
+#exportModal .export-options select{width:100%;min-width:0;max-width:100%;}
+#exportModal .progress-track{margin:12px 0;}
+#exportModal .modal-actions{display:flex;flex-wrap:wrap;gap:8px;position:sticky;bottom:-1px;padding:10px 0 2px;background:#181923;}
+#exportModal .modal-actions .btn{min-height:42px;flex:1 1 120px;}
+#exportModal .modal-note{line-height:1.6;margin-top:10px;}
+@media(max-width:520px),(max-height:700px){
+  #exportModal{place-items:start center;padding-top:max(8px,env(safe-area-inset-top));padding-bottom:max(8px,env(safe-area-inset-bottom));}
+  #exportModal .modal-card{max-height:calc(100dvh - 16px);border-radius:14px;}
+  #exportModal .modal-head h2{font-size:17px;}
+  #exportModal .export-preview{padding:10px;gap:6px;}
+  #exportModal .export-spinner{width:36px;height:36px;flex-basis:36px;font-size:21px;border-radius:11px;}
+  #exportModal .export-options{gap:8px;margin-top:9px;}
+  #exportModal .export-options label{font-size:10px;}
+  #exportModal .modal-actions .btn{min-height:44px;}
+}
+
 </style>
 
 </head>
@@ -236,7 +261,7 @@
     </section>
   </main>
   <div class="toast-region" id="toastRegion" aria-live="polite"></div>
-  <div class="modal-backdrop hidden" id="exportModal"><div class="modal-card"><div class="modal-head"><div><span class="eyebrow">FINAL RENDER</span><h2>מייצאים את הקסם שלך</h2></div><button class="subtle-icon" id="closeExportModal">×</button></div><div class="export-preview"><div class="export-spinner" id="exportSpinner">✦</div><b id="exportStatus">מכין את הסרטון...</b><span id="exportStatusDetail">הרינדור מתבצע בדפדפן שלך.</span></div><div class="export-options"><label>רזולוציית ייצוא<select id="exportResolution"><option value="1">720p · מהיר</option><option value="1.5" selected>1080p · מומלץ</option><option value="2">1440p · איכות גבוהה</option></select></label><label>קצב פריימים<select id="exportFps"><option value="24">24 FPS · קולנועי</option><option value="30" selected>30 FPS · רגיל</option><option value="60">60 FPS · חלק</option></select></label></div><div class="export-options"><label>רזולוציית ייצוא<select id="exportResolution"><option value="1">720p · מהיר</option><option value="1.5" selected>1080p · מומלץ</option><option value="2">1440p · איכות גבוהה</option></select></label><label>קצב פריימים<select id="exportFps"><option value="24">24 FPS · קולנועי</option><option value="30" selected>30 FPS · רגיל</option><option value="60">60 FPS · חלק</option></select></label></div><div class="progress-track"><span id="exportProgress"></span></div><div class="modal-actions"><button class="btn btn-outline" id="cancelExportBtn">ביטול</button><button class="btn btn-primary hidden" id="downloadExportBtn">⬇ הורדת הסרטון</button></div><small class="modal-note">ייצוא הדפדפן שומר בפורמט WebM. משך הייצוא דומה למשך הסרטון כדי לשמור על תנועה ואודיו מסונכרנים.</small></div></div>
+  <div class="modal-backdrop hidden" id="exportModal"><div class="modal-card"><div class="modal-head"><div><span class="eyebrow">FINAL RENDER</span><h2>מייצאים את הקסם שלך</h2></div><button class="subtle-icon" id="closeExportModal">×</button></div><div class="export-preview"><div class="export-spinner" id="exportSpinner">✦</div><b id="exportStatus">מכין את הסרטון...</b><span id="exportStatusDetail">הרינדור מתבצע בדפדפן שלך.</span></div><div class="export-options"><label>רזולוציית ייצוא<select id="exportResolution"><option value="1">720p · מהיר</option><option value="1.5" selected>1080p · מומלץ</option><option value="2">1440p · איכות גבוהה</option></select></label><label>קצב פריימים<select id="exportFps"><option value="24">24 FPS · קולנועי</option><option value="30" selected>30 FPS · רגיל</option><option value="60">60 FPS · חלק</option></select></label></div><div class="progress-track"><span id="exportProgress"></span></div><div class="modal-actions"><button class="btn btn-outline" id="cancelExportBtn">ביטול</button><button class="btn btn-primary hidden" id="downloadExportBtn">⬇ הורדת הסרטון</button></div><small class="modal-note">ייצוא הדפדפן שומר בפורמט WebM. משך הייצוא דומה למשך הסרטון כדי לשמור על תנועה ואודיו מסונכרנים.</small></div></div>
   <div class="modal-backdrop hidden" id="helpModal"><div class="modal-card help-card"><div class="modal-head"><div><span class="eyebrow">QUICK START</span><h2>מתחילים ליצור</h2></div><button class="subtle-icon" id="closeHelpModal">×</button></div><div class="help-steps"><div><b>01</b><span><strong>הכנס מדיה</strong><small>גרור וידאו, תמונות או מוזיקה לספרייה.</small></span></div><div><b>02</b><span><strong>ערוך שכבות</strong><small>הוסף טקסטים וסטיקרים, ואז לחץ עליהם בציר הזמן כדי לעצב.</small></span></div><div><b>03</b><span><strong>הוסף מעברים</strong><small>בחר קליפ ופתח את חלונית המעברים כדי להגדיר כניסה.</small></span></div><div><b>04</b><span><strong>ייצא ושמור</strong><small>ייצא סרטון WebM או שמור את הפרויקט כדי להמשיך מאוחר יותר.</small></span></div></div><button class="btn btn-primary wide" id="closeHelpOk">הבנתי, בוא ניצור</button></div></div>
   <div class="modal-backdrop hidden" id="ratioModal"><div class="modal-card ratio-modal"><div class="modal-head"><div><span class="eyebrow">CANVAS SETTINGS</span><h2>בחר יחס מסך</h2></div><button class="subtle-icon" id="closeRatioModal">×</button></div><div class="ratio-options"><button data-ratio="9:16" class="active"><span class="ratio-visual ratio-916"></span><b>9:16</b><small>Reels · TikTok · Shorts</small></button><button data-ratio="1:1"><span class="ratio-visual ratio-11"></span><b>1:1</b><small>Square feed</small></button><button data-ratio="16:9"><span class="ratio-visual ratio-169"></span><b>16:9</b><small>YouTube · Landscape</small></button><button data-ratio="4:5"><span class="ratio-visual ratio-45"></span><b>4:5</b><small>Instagram feed</small></button></div></div></div>
 </div>
