@@ -58,7 +58,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void saveFile(String name, String mime, String base64) {
             runOnUiThread(() -> {
                 try {
-                    pendingName = (name == null || name.trim().isEmpty()) ? "studio-file" : name.replaceAll("[\\\\/:*?\\"<>|]", "_");
+                    pendingName = (name == null || name.trim().isEmpty()) ? "studio-file" : name.replaceAll("[^A-Za-z0-9._-]", "_");
                     pendingMime = (mime == null || mime.isEmpty()) ? "application/octet-stream" : mime;
                     pendingBytes = Base64.decode(base64, Base64.DEFAULT);
                     Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
