@@ -17,7 +17,7 @@ android {
     }
 }
 tasks.register<Copy>("syncStudioAssets") {
-    from("../index.html")
+    from("../../index.html")
     into(layout.projectDirectory.dir("src/main/assets"))
 }
 tasks.named("preBuild") { dependsOn("syncStudioAssets") }
