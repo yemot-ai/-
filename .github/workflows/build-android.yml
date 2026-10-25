@@ -1,4 +1,4 @@
-name: Build CUTLAB Studio Ultra Android APK
+name: Build Social Android APK
 
 on:
   push:
@@ -23,7 +23,7 @@ defaults:
 
 jobs:
   build:
-    name: Build and verify Android APK
+    name: Build and verify Social Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -37,8 +37,8 @@ jobs:
           test -s app.css
           test -s app.js
           test -s app/src/main/java/com/yemotai/videostudio/MainActivity.kt
-          grep -q '<script' index.html
-          grep -q '<style' index.html
+          test -s app/src/main/res/drawable/ic_social.xml
+          grep -q 'android:label="סושיאל"' app/src/main/AndroidManifest.xml
       - name: Package standalone editor into Android assets
         run: |
           mkdir -p app/src/main/assets
@@ -87,14 +87,14 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: CUTLAB-STUDIO-ULTRA-Android-APK
+          name: SOCIAL-Android-APK
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
       - name: Upload standalone Chrome preview
         uses: actions/upload-artifact@v4
         with:
-          name: CUTLAB-STUDIO-ULTRA-Browser-HTML
+          name: SOCIAL-Browser-HTML
           path: index.html
           if-no-files-found: error
           retention-days: 30
