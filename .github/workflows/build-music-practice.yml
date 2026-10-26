@@ -53,6 +53,8 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
+      - name: Enable AndroidX for Android libraries
+        run: printf 'android.useAndroidX=true\n' > music-practice/gradle.properties
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace -p music-practice assembleDebug
       - name: Verify installable APK
