@@ -220,9 +220,10 @@ class MainActivity : Activity() {
                 progressBar.visibility = View.VISIBLE
                 progressBar.progress = 0
                 showStatus("מתחיל להכין את ההקראה…")
+                val sourceText = editor.text.toString().trim()
                 val chosenRate = speechRate()
                 val chosenPitch = pitchRate()
-                Thread { convertToMp3(editor.text.toString().trim(), chosenVoice, uri, chosenRate, chosenPitch) }.start()
+                Thread { convertToMp3(sourceText, chosenVoice, uri, chosenRate, chosenPitch) }.start()
             }
         }
     }
