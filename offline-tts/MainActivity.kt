@@ -220,24 +220,27 @@ class MainActivity : Activity() {
                 progressBar.visibility = View.VISIBLE
                 progressBar.progress = 0
                 showStatus("מתחיל להכין את ההקראה…")
-                Thread { convertToMp3(editor.text.toString().trim(), chosenVoice, uri) }.start()
+                val chosenRate = speechRate()
+                val chosenPitch = pitchRate()
+                Thread { convertToMp3(editor.text.toString().trim(), chosenVoice, uri, chosenRate, chosenPitch) }.start()
             }
         }
     }
 
-    private fun convertToMp3(rawText: String, voice: Voice, uri: Uri) {
+    private fun convertToMp3(rawText: String, voice: Voice, uri: Uri, rate: Float, pitch: Float) {
         var output: OutputStream? = null
         var writer: Mp3Writer? = null
         try {
             val chunks = splitText(rawText)
             val engine = tts ?: throw IOException("מנוע ההקראה אינו זמין")
-            output = BufferedOutputStream(contentResolver.openOutputStream(uri, "w")
+            val resultStream = BufferedOutputStream(contentResolver.openOutputStream(uri, "w")
                 ?: throw IOException("לא ניתן לפתוח את קובץ היעד"), 64 * 1024)
-            writer = Mp3Writer(output, 128, "הקראה")
+            output = resultStream
+            writer = Mp3Writer(resultStream, 128, "הקראה")
             engine.stop()
             engine.voice = voice
-            engine.setSpeechRate(speechRate())
-            engine.setPitch(pitchRate())
+            engine.setSpeechRate(rate)
+            engine.setPitch(pitch)
             val wav = File(cacheDir, "tts_chunk.wav")
             chunks.forEachIndexed { index, chunk ->
                 val id = "export-" + System.currentTimeMillis() + "-" + index
