@@ -74,7 +74,7 @@ jobs:
             offline-tts/android-mainactivity.patch.part05 \
             offline-tts/android-mainactivity.patch.part06 \
             > "$RUNNER_TEMP/android-mainactivity.patch"
-          patch --batch --forward -d "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts" -p1 < "$RUNNER_TEMP/android-mainactivity.patch"
+          patch --recount --batch --forward -d "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts" -p1 < "$RUNNER_TEMP/android-mainactivity.patch"
           grep -q 'object HebrewSpeech' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
           grep -q 'private data class VoiceChoice' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
 
