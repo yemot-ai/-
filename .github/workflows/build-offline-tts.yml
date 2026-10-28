@@ -106,7 +106,7 @@ jobs:
           s = s.replace("apply plugin: 'com.android.application'",
                         "apply plugin: 'com.android.application'\napply plugin: 'org.jetbrains.kotlin.android'")
           s = s.replace("repositories {\n    google()\n    mavenCentral()\n}", "repositories {\n    google()\n    mavenCentral()\n    maven { url 'https://jitpack.io' }\n}")
-          deps = """    implementation 'com.github.NorthernCaptain:TAndroidLame:1.1'
+          deps = """    implementation('com.github.NorthernCaptain:TAndroidLame:1.1') { exclude group: 'com.android.support', module: 'support-v4' }
               implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
               implementation 'com.google.mlkit:text-recognition:16.0.0'
               implementation 'com.google.android.gms:play-services-tasks:18.2.0'
