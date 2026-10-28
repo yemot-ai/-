@@ -105,14 +105,17 @@ jobs:
                         "classpath 'com.android.tools.build:gradle:8.13.2'\n        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.21'")
           s = s.replace("apply plugin: 'com.android.application'",
                         "apply plugin: 'com.android.application'\napply plugin: 'org.jetbrains.kotlin.android'")
-          s = s.replace("mavenCentral()\n}", "mavenCentral()\n    maven { url 'https://jitpack.io' }\n}")
-          extra = """    implementation 'com.github.NorthernCaptain:TAndroidLame:1.1'
+          s = s.replace("repositories {\n    google()\n    mavenCentral()\n}", "repositories {\n    google()\n    mavenCentral()\n    maven { url 'https://jitpack.io' }\n}")
+          deps = """    implementation 'com.github.NorthernCaptain:TAndroidLame:1.1'
               implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
               implementation 'com.google.mlkit:text-recognition:16.0.0'
               implementation 'com.google.android.gms:play-services-tasks:18.2.0'
               implementation 'androidx.core:core-ktx:1.13.1'"""
           if "com.tom-roush:pdfbox-android:2.0.27.0" not in s:
-              s = s.replace("dependencies {", "dependencies {\n" + extra + "\n", 1)
+              needle = "dependencies {\n    testImplementation"
+              if needle not in s:
+                  raise SystemExit("Application dependency block was not found")
+              s = s.replace(needle, "dependencies {\n" + deps + "\n    testImplementation", 1)
           s = s.replace("java.srcDirs = ['src']", "java.srcDirs = ['src']\n            kotlin.srcDirs = ['src']")
           gradle.write_text(s)
 
