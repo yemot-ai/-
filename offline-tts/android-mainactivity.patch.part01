@@ -1,0 +1,98 @@
+--- a/MainActivity.kt
++++ b/MainActivity.kt
+@@ -15,6 +15,7 @@
+ import android.graphics.Bitmap
+ import android.graphics.Color
+ import android.graphics.drawable.Icon
++import android.graphics.drawable.GradientDrawable
+ import android.graphics.pdf.PdfRenderer
+ import android.net.Uri
+ import android.os.Build
+@@ -68,6 +69,58 @@
+ import java.util.zip.ZipFile
+ import org.xmlpull.v1.XmlPullParser
+ 
++// ===== Hebrew speech normalization =====
++/** מנרמל ראשי תיבות ומספרים בתוך משפטים עבריים לפני שליחתם למנוע ההקראה. */
++object HebrewSpeech {
++    private val numberPattern = Regex("(?<![\\p{L}\\d])\\d{1,6}(?![\\p{L}\\d])")
++
++    fun prepare(input: String): String {
++        if (!input.any { it in '\u0590'..'\u05FF' }) return input
++        var text = input
++            .replace(Regex("(?i)(?<![A-Za-z])MP\\s*[-‐‑–]?\\s*3(?![A-Za-z0-9])"), "אם פי שלוש")
++            .replace(Regex("(?i)(?<![A-Za-z])PDF(?![A-Za-z])"), "פי די אף")
++            .replace(Regex("(?i)(?<![A-Za-z])URL(?![A-Za-z])"), "יו אר אל")
++            .replace(Regex("(?i)(?<![A-Za-z])GPT(?![A-Za-z])"), "ג'י פי טי")
++        text = numberPattern.replace(text) { m -> numberToHebrew(m.value.toLongOrNull() ?: return@replace m.value) }
++        return text
++    }
++
++    private val ones = arrayOf("", "אחת", "שתיים", "שלוש", "ארבע", "חמש", "שש", "שבע", "שמונה", "תשע")
++    private val teens = arrayOf("עשר", "אחת עשרה", "שתים עשרה", "שלוש עשרה", "ארבע עשרה", "חמש עשרה", "שש עשרה", "שבע עשרה", "שמונה עשרה", "תשע עשרה")
++    private val tens = arrayOf("", "", "עשרים", "שלושים", "ארבעים", "חמישים", "שישים", "שבעים", "שמונים", "תשעים")
++    private val hundreds = arrayOf("", "מאה", "מאתיים", "שלוש מאות", "ארבע מאות", "חמש מאות", "שש מאות", "שבע מאות", "שמונה מאות", "תשע מאות")
++
++    private fun numberToHebrew(n: Long): String {
++        if (n == 0L) return "אפס"
++        if (n < 1000L) return underThousand(n.toInt())
++        if (n < 1_000_000L) {
++            val thousands = (n / 1000L).toInt()
++            val remainder = (n % 1000L).toInt()
++            val head = when (thousands) {
++                1 -> "אלף"
++                2 -> "אלפיים"
++                in 3..10 -> listOf("", "", "", "שלושת אלפים", "ארבעת אלפים", "חמשת אלפים", "ששת אלפים", "שבעת אלפים", "שמונת אלפים", "תשעת אלפים", "עשרת אלפים")[thousands]
++                else -> underThousand(thousands) + " אלף"
++            }
++            return head + if (remainder > 0) " " + underThousand(remainder) else ""
++        }
++        return n.toString().map { if (it.isDigit()) underThousand(it.digitToInt()) else "" }.filter { it.isNotBlank() }.joinToString(" ")
++    }
++
++    private fun underThousand(n: Int): String {
++        if (n < 10) return if (n == 0) "" else ones[n]
++        if (n < 20) return teens[n - 10]
++        if (n < 100) {
++            val ten = tens[n / 10]
++            val unit = n % 10
++            return ten + if (unit == 0) "" else " ו" + ones[unit]
++        }
++        val h = hundreds[n / 100]
++        val r = n % 100
++        return h + if (r == 0) "" else " " + underThousand(r)
++    }
++}
++
+ // ===== Chunker =====
+ /** מפצל טקסט ארוך לקטעים קצרים (לפי משפטים) כדי שמנוע ה-TTS לא ייחנק ושהזיכרון יישאר קטן. */
+ class Chunker(private val max: Int, private val emit: (String) -> Unit) {
+@@ -362,6 +415,7 @@
+         when (fileName.substringAfterLast('.', "").lowercase()) {
+             "pdf" -> pdf(uri)
+             "docx", "docm", "dotx" -> zipXml(uri, "word/document.xml")
++            "doc", "xls", "ppt" -> throw IllegalArgumentException("הקובץ בפורמט Office ישן. שמור אותו כ‑DOCX / XLSX / PPTX או כ‑PDF לפני ההקראה.")
+             "odt", "ott" -> zipXml(uri, "content.xml")
+             "epub" -> epub(uri)
+             "html", "htm", "xhtml", "xml", "fb2", "mht" -> sequenceOf(Block(htmlToText(readAll(uri)), 1f, false))
+@@ -683,6 +737,7 @@
+                 } else {
+                     var text = raw
+                     for ((a, b) in pairs) text = text.replace(a, b)
++                    text = HebrewSpeech.prepare(text)
+                     var done = false
+                     for (attempt in 1..3) {
+                         if (done) break
+@@ -802,12 +857,19 @@
+ 
+ // ===== MainActivity =====
+ class MainActivity : Activity() {
++    private data class VoiceChoice(
++        val voice: Voice,
++        val title: String,
++        val style: String = "natural",
++        val rateFactor: Float = 1f,
++        val pitchFactor: Float = 1f
++    )
+     private val REQ_PICK = 1
+     private val REQ_FOLDER = 2
