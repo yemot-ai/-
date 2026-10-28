@@ -6,6 +6,11 @@ on:
     paths:
       - "offline-tts/**"
       - ".github/workflows/build-offline-tts.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "offline-tts/**"
+      - ".github/workflows/build-offline-tts.yml"
   workflow_dispatch:
 
 permissions:
