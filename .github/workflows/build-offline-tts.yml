@@ -85,7 +85,7 @@ jobs:
           """
           if "com.example.offlinetts.MainActivity" not in m:
               m = m.replace("    </application>", app_activity + "\n    </application>", 1)
-          m = m.replace('android:label="@string/app_name"', 'android:label="מקריא ל-MP3"', 1)
+          m = m.replace('android:label="מקריא ל-MP3"', 'android:label="@string/app_name"', 1)
           manifest.write_text(m)
 
           strings = base / "res" / "values" / "strings.xml"
