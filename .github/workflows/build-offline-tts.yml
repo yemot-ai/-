@@ -1,4 +1,4 @@
-name: Build מקריא ל-MP3 with embedded offline voices
+name: Build מקריא ל-MP3 עם מנוע וקולות מובנים
 
 on:
   push:
@@ -13,24 +13,24 @@ permissions:
 
 jobs:
   build:
-    name: Build and verify standalone offline TTS APK
+    name: Build full offline TTS APK
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
-      - name: Check out app source
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up JDK
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Install Android build tools
+      - name: Install Android SDK, NDK and CMake
         run: |
-          SDK_DIR="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          SDK_DIR="/usr/local/lib/android/sdk"
           SDKMANAGER="$(find "$SDK_DIR/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -n 1)"
-          if [ -z "$SDKMANAGER" ]; then echo "sdkmanager was not found under $SDK_DIR"; exit 1; fi
+          if [ -z "$SDKMANAGER" ]; then echo "sdkmanager not found under $SDK_DIR"; exit 1; fi
           echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
           echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
@@ -42,19 +42,63 @@ jobs:
         with:
           gradle-version: "8.13"
 
-      - name: Fetch eSpeak NG source for its bundled offline TTS engine
+      - name: Reconstruct and verify original app source
+        run: |
+          mkdir -p "$RUNNER_TEMP/offline-tts-original"
+          cat \
+            offline-tts/source-parts/part-01.b64 \
+            offline-tts/source-parts/part-02.b64 \
+            offline-tts/source-parts/part-03.b64 \
+            offline-tts/source-parts/part-04.b64 \
+            offline-tts/source-parts/part-05a.b64 \
+            offline-tts/source-parts/part-05b.b64 \
+            | tr -d '\r\n ' | base64 -d > "$RUNNER_TEMP/OfflineTts.zip"
+          unzip -t "$RUNNER_TEMP/OfflineTts.zip"
+          unzip -q "$RUNNER_TEMP/OfflineTts.zip" -d "$RUNNER_TEMP/offline-tts-original"
+          test -s "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
+          test -s "$RUNNER_TEMP/offline-tts-original/app/build.gradle.kts"
+          test -s "$RUNNER_TEMP/offline-tts-original/app/src/main/AndroidManifest.xml"
+
+      - name: Fetch eSpeak NG embedded engine source
         run: |
           git clone --depth 1 https://github.com/espeak-ng/espeak-ng.git "$RUNNER_TEMP/espeak-ng"
-          mkdir -p "$RUNNER_TEMP/espeak-ng/android/src/com/example/offlinetts"
-          cp "$GITHUB_WORKSPACE/offline-tts/MainActivity.kt" "$RUNNER_TEMP/espeak-ng/android/src/com/example/offlinetts/MainActivity.kt"
+          APP="$RUNNER_TEMP/espeak-ng/android"
+          ORIG="$RUNNER_TEMP/offline-tts-original/app"
+          mkdir -p "$APP/src/com/example/offlinetts" "$APP/res/drawable"
+          cp "$ORIG/src/main/java/com/example/offlinetts/MainActivity.kt" "$APP/src/com/example/offlinetts/MainActivity.kt"
 
-      - name: Integrate the app with the embedded engine
+      - name: Integrate original features and embedded offline TTS engine
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
+          import os, re
 
-          base = Path(__import__("os").environ["RUNNER_TEMP"]) / "espeak-ng" / "android"
+          root = Path(os.environ["RUNNER_TEMP"])
+          base = root / "espeak-ng" / "android"
+          main = base / "src/com/example/offlinetts/MainActivity.kt"
+          code = main.read_text()
+
+          code, n1 = re.subn(
+              r'tts = TextToSpeech\(applicationContext\) \{ status ->',
+              'tts = TextToSpeech(applicationContext, { status ->',
+              code, count=1)
+          code, n2 = re.subn(
+              r'(else Thread \{ work\(p\) \}\.start\(\)\s*\n\s*)\}',
+              r'\1}, packageName)',
+              code, count=1)
+          code, n3 = re.subn(
+              r'tts = TextToSpeech\(this\) \{ st ->',
+              'tts = TextToSpeech(this, { st ->',
+              code, count=1)
+          code, n4 = re.subn(
+              r'(else tvStatus\.text = "מנוע הקראה לא זמין\. התקן Speech Services by Google\."\s*\n\s*)\}',
+              r'else tvStatus.text = "מנוע הקול המובנה לא זמין."\n        }, packageName)',
+              code, count=1)
+          if (n1, n2, n3, n4) != (1, 1, 1, 1):
+              raise SystemExit("Could not bind both original TTS entry points to the embedded eSpeak engine: " + repr((n1,n2,n3,n4)))
+          code = code.replace("מנוע ההקראה לא עלה", "מנוע הקול המובנה לא עלה")
+          main.write_text(code)
+
           gradle = base / "build.gradle"
           s = gradle.read_text()
           s = s.replace("classpath 'com.android.tools.build:gradle:9.3.0'",
@@ -62,64 +106,97 @@ jobs:
           s = s.replace("apply plugin: 'com.android.application'",
                         "apply plugin: 'com.android.application'\napply plugin: 'org.jetbrains.kotlin.android'")
           s = s.replace("mavenCentral()\n}", "mavenCentral()\n    maven { url 'https://jitpack.io' }\n}")
-          s = s.replace("dependencies {\n    testImplementation",
-                        "dependencies {\n    implementation 'com.github.NorthernCaptain:TAndroidLame:1.1'\n    testImplementation", 1)
-          if "org.jetbrains.kotlin.android" not in s or "TAndroidLame" not in s:
-              raise SystemExit("Could not patch Gradle dependencies for the MP3 app")
+          extra = """    implementation 'com.github.NorthernCaptain:TAndroidLame:1.1'
+              implementation 'com.tom-roush:pdfbox-android:2.0.27.0'
+              implementation 'com.google.mlkit:text-recognition:16.0.0'
+              implementation 'com.google.android.gms:play-services-tasks:18.2.0'
+              implementation 'androidx.core:core-ktx:1.13.1'"""
+          if "com.tom-roush:pdfbox-android:2.0.27.0" not in s:
+              s = s.replace("dependencies {", "dependencies {\n" + extra + "\n", 1)
+          s = s.replace("java.srcDirs = ['src']", "java.srcDirs = ['src']\n            kotlin.srcDirs = ['src']")
           gradle.write_text(s)
 
           manifest = base / "AndroidManifest.xml"
           m = manifest.read_text()
+          m = m.replace('xmlns:android="http://schemas.android.com/apk/res/android"',
+                        'xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"', 1)
           permissions = """
-              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
               <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+              <uses-permission android:name="android.permission.WAKE_LOCK" />
+              <queries><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>
           """
           m = m.replace("    <application", permissions + "\n    <application", 1)
-          app_activity = """
-                  <activity android:name="com.example.offlinetts.MainActivity" android:exported="true">
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-                  </activity>
-          """
-          if "com.example.offlinetts.MainActivity" not in m:
-              m = m.replace("    </application>", app_activity + "\n    </application>", 1)
-          m = m.replace('android:label="מקריא ל-MP3"', 'android:label="@string/app_name"', 1)
+          m = m.replace('android:icon="@mipmap/icon"', 'android:icon="@drawable/ic_mp3_mic"', 1)
+          if 'com.example.offlinetts.MainActivity' not in m:
+              m = m.replace('        <service\n            android:name=".TtsService"',
+                            '''        <activity android:name="com.example.offlinetts.MainActivity" android:exported="true" android:label="@string/app_name">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+                <service android:name="com.example.offlinetts.ConvertService" android:exported="false" android:foregroundServiceType="dataSync" />
+                <service
+            android:name=".TtsService"''', 1)
           manifest.write_text(m)
 
-          strings = base / "res" / "values" / "strings.xml"
+          strings = base / "res/values/strings.xml"
           if strings.exists():
               t = strings.read_text()
-              t = re.sub(r'(<string\s+name="app_name"\s*>).*?(</string>)',
-                         r'\1מקריא ל-MP3\2', t, count=1, flags=re.S)
+              if re.search(r'<string\s+name="app_name"', t):
+                  t = re.sub(r'(<string\s+name="app_name"\s*>).*?(</string>)',
+                             r'\1מקריא ל-MP3\2', t, count=1, flags=re.S)
+              else:
+                  t = t.replace('</resources>', '    <string name="app_name">מקריא ל-MP3</string>\n</resources>')
               strings.write_text(t)
+
+          icon = base / "res/drawable/ic_mp3_mic.xml"
+          icon.write_text('''<?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp" android:height="108dp"
+              android:viewportWidth="108" android:viewportHeight="108">
+              <path android:fillColor="#0B1020" android:pathData="M0,0h108v108h-108z"/>
+              <path android:fillColor="#55DFD0" android:pathData="M54,16c-8,0 -14,6 -14,14v26c0,8 6,14 14,14s14,-6 14,-14V30c0,-8 -6,-14 -14,-14z"/>
+              <path android:fillColor="#6699FF" android:pathData="M27,49h6v10c0,12 9,21 21,21s21,-9 21,-21V49h6v10c0,14 -10,25 -24,27v7h12v6H39v-6h12v-7C37,84 27,73 27,59z"/>
+              <path android:fillColor="#FFD07A" android:pathData="M15,44h4v20h-4zM22,38h4v32h-4zM86,38h4v32h-4zM93,44h4v20h-4z"/>
+          </vector>
+          ''')
+
+          required = ["class ConvertService", "class TextExtractor", "TextRecognition.getClient",
+                      "PDFTextStripper", "class PartWriter", "class Chunker"]
+          for needle in required:
+              if needle not in code:
+                  raise SystemExit("Original feature missing: " + needle)
           PY
 
-      - name: Verify offline app wiring
+      - name: Verify source and embedded engine wiring
         run: |
-          grep -q "com.example.offlinetts.MainActivity" "$RUNNER_TEMP/espeak-ng/android/AndroidManifest.xml"
-          grep -q "com.reecedunn.espeak.TtsService" "$RUNNER_TEMP/espeak-ng/android/AndroidManifest.xml" || grep -q 'android:name=".TtsService"' "$RUNNER_TEMP/espeak-ng/android/AndroidManifest.xml"
-          grep -q "TextToSpeech(this, " offline-tts/MainActivity.kt
-          test -s offline-tts/preview.html
+          grep -q 'android:name="com.example.offlinetts.MainActivity"' "$RUNNER_TEMP/espeak-ng/android/AndroidManifest.xml"
+          grep -q 'com.example.offlinetts.ConvertService' "$RUNNER_TEMP/espeak-ng/android/AndroidManifest.xml"
+          grep -q 'android:name=".TtsService"' "$RUNNER_TEMP/espeak-ng/android/AndroidManifest.xml"
+          grep -q 'TextToSpeech(applicationContext, { status ->' "$RUNNER_TEMP/espeak-ng/android/src/com/example/offlinetts/MainActivity.kt"
+          grep -q 'TextToSpeech(this, { st ->' "$RUNNER_TEMP/espeak-ng/android/src/com/example/offlinetts/MainActivity.kt"
+          grep -q 'PDFTextStripper' "$RUNNER_TEMP/espeak-ng/android/src/com/example/offlinetts/MainActivity.kt"
+          grep -q 'TextRecognition.getClient' "$RUNNER_TEMP/espeak-ng/android/src/com/example/offlinetts/MainActivity.kt"
 
-      - name: Build APK with embedded eSpeak NG voices
+      - name: Build APK with bundled voices and original features
         run: |
           gradle --no-daemon --stacktrace -p "$RUNNER_TEMP/espeak-ng/android" assembleDebug
 
-      - name: Verify APK
+      - name: Verify installable APK and bundled voice data
         run: |
-          APK="$RUNNER_TEMP/espeak-ng/android/build/outputs/apk/debug/android-debug.apk"
-          if [ ! -f "$APK" ]; then
-            APK="$(find "$RUNNER_TEMP/espeak-ng/android/build/outputs/apk" -type f -name '*.apk' | head -n 1)"
-          fi
+          APK="$(find "$RUNNER_TEMP/espeak-ng/android/build/outputs/apk" -type f -name '*.apk' | head -n 1)"
           test -s "$APK"
           unzip -t "$APK" | tail -n 1
           test -s "$RUNNER_TEMP/espeak-ng/android/res/raw/espeakdata.zip"
-          echo "APK built successfully: $APK"
-          ls -lh "$APK"
+          unzip -l "$APK" | grep -qi 'libttsespeak.so'
+          unzip -l "$APK" | grep -qi 'espeakdata.zip'
           mkdir -p out
           cp "$APK" out/מקריא-ל-MP3.apk
+          ls -lh out/מקריא-ל-MP3.apk
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
@@ -132,7 +209,7 @@ jobs:
       - name: Upload computer preview
         uses: actions/upload-artifact@v4
         with:
-          name: מקריא-ל-MP3-Preview
+          name: מקריא-ל-MP3-תצוגה-למחשב
           path: offline-tts/preview.html
           if-no-files-found: error
           retention-days: 30
