@@ -146,15 +146,17 @@ jobs:
             android:name=".TtsService"''', 1)
           manifest.write_text(m)
 
-          strings = base / "res/values/strings.xml"
-          if strings.exists():
-              t = strings.read_text()
-              if re.search(r'<string\s+name="app_name"', t):
-                  t = re.sub(r'(<string\s+name="app_name"\s*>).*?(</string>)',
-                             r'\1מקריא ל-MP3\2', t, count=1, flags=re.S)
-              else:
-                  t = t.replace('</resources>', '    <string name="app_name">מקריא ל-MP3</string>\n</resources>')
-              strings.write_text(t)
+          # In eSpeak NG, app_name lives in donottranslate.xml. Do not add a second
+          # resource with the same key to strings.xml.
+          app_name_file = base / "res/values/donottranslate.xml"
+          if not app_name_file.exists():
+              raise SystemExit("eSpeak app_name resource file was not found")
+          t = app_name_file.read_text()
+          t, n = re.subn(r'(<string\s+name="app_name"[^>]*>).*?(</string>)',
+                         r'\1מקריא ל-MP3\2', t, count=1, flags=re.S)
+          if n != 1:
+              raise SystemExit("Could not rename eSpeak launcher label")
+          app_name_file.write_text(t)
 
           icon = base / "res/drawable/ic_mp3_mic.xml"
           icon.write_text('''<?xml version="1.0" encoding="utf-8"?>
