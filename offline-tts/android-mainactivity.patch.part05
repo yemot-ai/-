@@ -1,0 +1,69 @@
+-            tvStatus.text = "לא נמצאו קולות מותקנים. הורד קול: הגדרות > מערכת > שפה > פלט טקסט-לדיבור."
++            tvStatus.text = "לא נמצאו קולות מקומיים במכשיר. התקן קול דרך הגדרות פלט טקסט‑לדיבור."
+             return
+         }
+-        spVoice.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item,
+-            voices.map { "\${it.locale.displayName} · \${it.name}" })
+-        val saved = voices.indexOfFirst { it.name == prefs.getString("voice", null) }.takeIf { it >= 0 }
+-        val def = saved ?: voices.indexOfFirst { it.locale.language == "he" }.takeIf { it >= 0 }
+-            ?: voices.indexOfFirst { it.name == tts?.defaultVoice?.name }.coerceAtLeast(0)
+-        spVoice.setSelection(def)
++        spVoice.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, voices.map { it.title })
++        val savedName = prefs.getString("voice", null)
++        val savedStyle = prefs.getString("voiceStyle", "natural")
++        val saved = voices.indexOfFirst { it.voice.name == savedName && it.style == savedStyle }.takeIf { it >= 0 }
++        val hebrew = voices.indexOfFirst { it.voice.locale.language == "he" && it.style == "natural" }.takeIf { it >= 0 }
++        val default = saved ?: hebrew ?: voices.indexOfFirst { it.voice.name == tts?.defaultVoice?.name }.coerceAtLeast(0)
++        spVoice.setSelection(default)
++        if (hebrew == null) tvStatus.text = "לא נמצא קול עברי מקומי. בדוק את התקנת הקולות במערכת."
+     }
+ 
+-    private fun selectedVoice(): Voice? = voices.getOrNull(spVoice.selectedItemPosition)
++    private fun selectedVoice(): VoiceChoice? = voices.getOrNull(spVoice.selectedItemPosition)
+ 
+     private fun preview() {
+         val t = tts ?: return
+-        val v = selectedVoice() ?: return
+-        t.stop(); t.voice = v; t.setSpeechRate(speed()); t.setPitch(pitch())
+-        val sample = if (v.locale.language == "he") "שלום, זהו קול לדוגמה." else "Hello, this is a sample voice."
++        val choice = selectedVoice() ?: return
++        t.stop(); t.voice = choice.voice
++        t.setSpeechRate((speed() * choice.rateFactor).coerceIn(0.1f, 2.0f))
++        t.setPitch((pitch() * choice.pitchFactor).coerceIn(0.5f, 2.0f))
++        val sample = if (choice.voice.locale.language == "he") HebrewSpeech.prepare("שלום וברוכים הבאים למקריא ל‑MP3. כאן אפשר להאזין לדוגמת קול ולבחור סגנון דיבור.") else "Hello, welcome to the MP3 reader. This is a sample of the selected voice."
+         t.speak(sample, TextToSpeech.QUEUE_FLUSH, null, "preview")
+     }
+ 
+     private fun savePrefs() {
++        val choice = selectedVoice()
+         prefs.edit()
+-            .putString("voice", selectedVoice()?.name)
++            .putString("voice", choice?.voice?.name)
++            .putString("voiceStyle", choice?.style ?: "natural")
+             .putInt("bitrate", spBitrate.selectedItemPosition).putInt("split", spSplit.selectedItemPosition)
+             .putInt("pause", spPause.selectedItemPosition).putInt("speed", sbSpeed.progress)
+             .putInt("pitch", sbPitch.progress).putString("repl", etRepl.text.toString()).apply()
+@@ -987,12 +1125,16 @@
+                 try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) {}
+                 srcUri = uri
+                 var size = 0L
++                var resolvedName: String? = null
+                 contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use {
+                     if (it.moveToFirst()) {
+-                        srcName = it.getString(0) ?: "file"
++                        resolvedName = it.getString(0)
+                         if (!it.isNull(1)) size = it.getLong(1)
+                     }
+                 }
++                srcName = resolvedName?.takeIf { it.isNotBlank() }
++                    ?: uri.lastPathSegment?.substringAfterLast('/')?.substringAfter(':')?.takeIf { it.contains('.') }
++                    ?: "מסמך.txt"
+                 srcKey = Checkpoint.key(srcName, size)
+                 tvFile.text = "נבחר: $srcName"
+                 val ck = Checkpoint.get(this, srcKey)
+@@ -1023,8 +1165,9 @@
+         }
+         val i = Intent(this, ConvertService::class.java)
+             .putExtra("src", src.toString()).putExtra("name", name).putExtra("key", key)
+-            .putExtra("folder", folder.toString()).putExtra("voice", selectedVoice()?.name)
+-            .putExtra("rate", speed()).putExtra("pitch", pitch())
