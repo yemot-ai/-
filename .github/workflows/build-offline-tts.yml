@@ -64,13 +64,19 @@ jobs:
           test -s "$RUNNER_TEMP/offline-tts-original/app/build.gradle.kts"
           test -s "$RUNNER_TEMP/offline-tts-original/app/src/main/AndroidManifest.xml"
 
-      - name: Export original Android source for compatibility review
-        uses: actions/upload-artifact@v4
-        with:
-          name: OfflineTts-Original-Source
-          path: ${{ runner.temp }}/OfflineTts.zip
-          if-no-files-found: error
-          retention-days: 1
+      - name: Patch Android UI, Hebrew pronunciation and voice profiles
+        run: |
+          cat \
+            offline-tts/android-mainactivity.patch.part01 \
+            offline-tts/android-mainactivity.patch.part02 \
+            offline-tts/android-mainactivity.patch.part03 \
+            offline-tts/android-mainactivity.patch.part04 \
+            offline-tts/android-mainactivity.patch.part05 \
+            offline-tts/android-mainactivity.patch.part06 \
+            > "$RUNNER_TEMP/android-mainactivity.patch"
+          patch --batch --forward -d "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts" -p1 < "$RUNNER_TEMP/android-mainactivity.patch"
+          grep -q 'object HebrewSpeech' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
+          grep -q 'private data class VoiceChoice' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
 
       - name: Fetch eSpeak NG embedded engine source
         run: |
