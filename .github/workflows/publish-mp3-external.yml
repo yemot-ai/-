@@ -26,7 +26,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: 40913184250
 
-      - name: Upload APK to a non-GitHub file host
+      - name: Upload APK to an external file host
         shell: bash
         run: |
           set -euo pipefail
@@ -35,28 +35,40 @@ jobs:
           APK_URL=""
           HOST=""
 
-          # Try Catbox first, using ZIP in case the host rejects raw APK files.
-          mkdir -p outgoing
-          zip -j -q outgoing/MP3Reader.zip "$APK"
-          if RESPONSE="$(curl --fail --silent --show-error --max-time 240 --retry 1 \
-            -F 'reqtype=fileupload' \
-            -F 'fileToUpload=@outgoing/MP3Reader.zip;filename=MP3Reader.zip;type=application/zip' \
-            https://catbox.moe/user/api.php 2>&1)"; then
-            case "$RESPONSE" in
-              https://files.catbox.moe/*) APK_URL="$RESPONSE"; HOST="Catbox ZIP" ;;
-            esac
+          # Gofile accepts guest uploads without an account or token.
+          if RESPONSE="$(curl --fail --silent --show-error --max-time 300 --retry 1 \
+            -F "file=@$APK;filename=MP3Reader.apk;type=application/vnd.android.package-archive" \
+            https://upload.gofile.io/uploadfile 2>&1)"; then
+            if printf '%s' "$RESPONSE" | python3 -c 'import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get("status")=="ok" and d.get("data",{}).get("downloadPage") else 1)'; then
+              APK_URL="$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["downloadPage"])')"
+              HOST="Gofile"
+            fi
           fi
 
-          # If Catbox is unavailable, try a 48-hour temporary link with the raw APK.
+          # Fallback: Catbox ZIP, because some hosts refuse raw APK files.
+          if [ -z "$APK_URL" ]; then
+            mkdir -p outgoing
+            zip -j -q outgoing/MP3Reader.zip "$APK"
+            if RESPONSE="$(curl --fail --silent --show-error --max-time 240 --retry 1 \
+              -F 'reqtype=fileupload' \
+              -F 'fileToUpload=@outgoing/MP3Reader.zip;filename=MP3Reader.zip;type=application/zip' \
+              https://catbox.moe/user/api.php 2>&1)"; then
+              case "$RESPONSE" in
+                https://files.catbox.moe/*) APK_URL="$RESPONSE"; HOST="Catbox ZIP" ;;
+              esac
+            fi
+          fi
+
+          # Last fallback: 48-hour temporary download.
           if [ -z "$APK_URL" ]; then
             RESPONSE="$(curl --fail --silent --show-error --max-time 300 --retry 1 \
               -F "file=@$APK;filename=MP3Reader.apk" \
               -F "expire=172800" \
               https://tmpfiles.org/api/v1/upload)"
-            APK_URL="$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("data",{}).get("url",""))')"
-            case "$APK_URL" in
+            PAGE_URL="$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("data",{}).get("url",""))')"
+            case "$PAGE_URL" in
               https://tmpfiles.org/*)
-                APK_URL="${APK_URL/https:\/\/tmpfiles.org\//https:\/\/tmpfiles.org\/dl\/}"
+                APK_URL="${PAGE_URL/https:\/\/tmpfiles.org\//https:\/\/tmpfiles.org\/dl\/}"
                 HOST="tmpfiles.org (expires within 48 hours)"
                 ;;
               *) echo "Unusable response from temporary host: $RESPONSE"; exit 1 ;;
