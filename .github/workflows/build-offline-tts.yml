@@ -92,7 +92,7 @@ jobs:
           code = main.read_text()
           start = code.index("    private fun loadVoices() {")
           end = code.index("    private fun onConvert() {", start)
-          code = code[:start] + target.read_text() + "\\n" + code[end:]
+          code = code[:start] + target.read_text() + chr(10) + code[end:]
           main.write_text(code)
           PY
           grep -q 'object HebrewSpeech' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
