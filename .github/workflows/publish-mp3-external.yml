@@ -17,6 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Checkout repository for publishing the link
+        uses: actions/checkout@v4
+
       - name: Download APK artifact from the successful build
         uses: actions/download-artifact@v4
         with:
