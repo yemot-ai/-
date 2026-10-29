@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -260,3 +260,16 @@ jobs:
           path: offline-tts/preview.html
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish direct APK URL on a separate branch
+        if: github.event_name != 'pull_request'
+        run: |
+          cp "out/מקריא-ל-MP3.apk" "$RUNNER_TEMP/MP3Reader.apk"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan apk-download
+          git clean -fd
+          cp "$RUNNER_TEMP/MP3Reader.apk" MP3Reader.apk
+          git add -f MP3Reader.apk
+          git commit -m "Publish standalone APK download"
+          git push --force origin HEAD:apk-download
