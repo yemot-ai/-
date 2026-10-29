@@ -64,13 +64,40 @@ jobs:
           test -s "$RUNNER_TEMP/offline-tts-original/app/build.gradle.kts"
           test -s "$RUNNER_TEMP/offline-tts-original/app/src/main/AndroidManifest.xml"
 
-      - name: Export original Android source for compatibility review
-        uses: actions/upload-artifact@v4
-        with:
-          name: OfflineTts-Original-Source
-          path: ${{ runner.temp }}/OfflineTts.zip
-          if-no-files-found: error
-          retention-days: 1
+      - name: Patch Android UI, Hebrew pronunciation and voice profiles
+        run: |
+          cat \
+            offline-tts/android-mainactivity.patch.part01 \
+            offline-tts/android-mainactivity.patch.part02 \
+            offline-tts/android-mainactivity.patch.part03 \
+            offline-tts/android-mainactivity.patch.part04 \
+            offline-tts/android-mainactivity.patch.part05 \
+            offline-tts/android-mainactivity.patch.part06 \
+            > "$RUNNER_TEMP/android-mainactivity.patch"
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+          patch_file = Path(os.environ["RUNNER_TEMP"]) / "android-mainactivity.patch"
+          patch_text = patch_file.read_text()
+          patch_text = patch_text.replace("@@ -922,46 +1042,64 @@", "@@ -922,45 +1042,64 @@", 1)
+          a = patch_text.index("@@ -922,45 +1042,64 @@")
+          b = patch_text.index("@@ -987,12 +1125,16 @@", a)
+          patch_file.write_text(patch_text[:a] + patch_text[b:])
+          PY
+          patch --fuzz=5 --batch --forward -d "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts" -p1 < "$RUNNER_TEMP/android-mainactivity.patch"
+          python3 - <<'PY'
+          from pathlib import Path
+          target = Path("offline-tts/android-voice-functions.ktfrag")
+          main = Path(__import__("os").environ["RUNNER_TEMP"]) / "offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
+          code = main.read_text()
+          start = code.index("    private fun loadVoices() {")
+          end = code.index("    private fun onConvert() {", start)
+          code = code[:start] + target.read_text() + chr(10) + code[end:]
+          main.write_text(code)
+          PY
+          grep -q 'object HebrewSpeech' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
+          grep -q 'private data class VoiceChoice' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
+          grep -q 'private fun selectedVoice(): VoiceChoice?' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
 
       - name: Fetch eSpeak NG embedded engine source
         run: |

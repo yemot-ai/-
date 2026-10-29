@@ -1,0 +1,84 @@
+     private val REQ_NOTIF = 3
+ 
+     private var tts: TextToSpeech? = null
+-    private var voices: List<Voice> = emptyList()
++    private var voices: List<VoiceChoice> = emptyList()
+     private var srcUri: Uri? = null
+     private var srcName = "text"
+     private var srcKey = ""
+@@ -837,84 +899,142 @@
+     private fun pitch() = 0.5f + sbPitch.progress / 100f
+     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+ 
+-    private fun label(t: String) = TextView(this).apply { text = t; setPadding(0, dp(10), 0, 0) }
+-    private fun button(t: String, f: () -> Unit) = Button(this).apply { text = t; setOnClickListener { f() } }
++    private fun rounded(color: Int, stroke: Int = 0, radius: Int = 16) = GradientDrawable().apply {
++        setColor(color); cornerRadius = dp(radius).toFloat()
++        if (stroke != 0) setStroke(dp(1), stroke)
++    }
++    private fun label(t: String) = TextView(this).apply {
++        text = t; setTextColor(Color.rgb(226, 235, 250)); textSize = 14f
++        setPadding(0, dp(10), 0, dp(4))
++    }
++    private fun button(t: String, f: () -> Unit) = Button(this).apply {
++        text = t; textSize = 13f; isAllCaps = false; setTextColor(Color.rgb(7, 18, 35))
++        background = rounded(Color.rgb(76, 229, 205), radius = 12)
++        minHeight = dp(46); setPadding(dp(14), dp(8), dp(14), dp(8))
++        setOnClickListener { f() }
++    }
+     private fun multiline(hint: String, lines: Int) = EditText(this).apply {
+-        this.hint = hint
++        this.hint = hint; setHintTextColor(Color.rgb(132, 151, 180))
++        setTextColor(Color.rgb(247, 249, 255)); textSize = 15f
++        background = rounded(Color.rgb(9, 18, 37), Color.rgb(42, 61, 95), 12)
++        setPadding(dp(12), dp(10), dp(12), dp(10))
+         inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+-        minLines = lines; maxLines = lines + 3
++        minLines = lines; maxLines = lines + 5
+         gravity = Gravity.TOP or Gravity.START
+     }
+     private fun spinner(items: List<String>) = Spinner(this).apply {
+-        adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, items)
++        background = rounded(Color.rgb(17, 29, 50), Color.rgb(48, 67, 98), 10)
++        adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_dropdown_item, items).also { a ->
++            a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
++        }
++    }
++    private fun section(title: String): LinearLayout = LinearLayout(this).apply {
++        orientation = LinearLayout.VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(14))
++        background = rounded(Color.rgb(17, 26, 48), Color.rgb(38, 55, 88), 18)
++        addView(TextView(this@MainActivity).apply {
++            text = title; setTextColor(Color.rgb(76, 229, 205)); textSize = 17f
++            typeface = android.graphics.Typeface.DEFAULT_BOLD
++            setPadding(0, 0, 0, dp(5))
++        })
+     }
+ 
+     override fun onCreate(b: Bundle?) {
+         super.onCreate(b)
++        window.statusBarColor = Color.rgb(8, 13, 28)
++        window.navigationBarColor = Color.rgb(8, 13, 28)
++        window.decorView.systemUiVisibility = 0
++
+         val col = LinearLayout(this).apply {
+             orientation = LinearLayout.VERTICAL
+-            setPadding(dp(16), dp(16), dp(16), dp(16))
++            setPadding(dp(14), dp(14), dp(14), dp(24))
++            setBackgroundColor(Color.rgb(8, 13, 28))
+         }
+-        setContentView(ScrollView(this).apply { layoutDirection = View.LAYOUT_DIRECTION_RTL; addView(col) })
++        setContentView(ScrollView(this).apply {
++            setBackgroundColor(Color.rgb(8, 13, 28)); isFillViewport = true
++            layoutDirection = View.LAYOUT_DIRECTION_RTL; addView(col)
++        })
+ 
+-        col.addView(button("בחר קובץ (TXT, PDF, DOCX, EPUB, HTML, תמונה ועוד)") {
+-            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), REQ_PICK)
++        val header = LinearLayout(this).apply {
++            orientation = LinearLayout.VERTICAL; setPadding(dp(5), dp(6), dp(5), dp(18))
++        }
++        header.addView(TextView(this).apply {
++            text = "🎙  מקריא ל‑MP3"; textSize = 27f; typeface = android.graphics.Typeface.DEFAULT_BOLD
++            setTextColor(Color.WHITE)
++        })
++        header.addView(TextView(this).apply {
