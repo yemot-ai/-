@@ -269,21 +269,10 @@ jobs:
             -F 'reqtype=fileupload' \
             -F 'fileToUpload=@out/מקריא-ל-MP3.apk;filename=MP3Reader.apk;type=application/vnd.android.package-archive' \
             https://catbox.moe/user/api.php)"
-          if ! printf '%s' "$APK_URL" | grep -Eq '^https://files\.catbox\.moe/[A-Za-z0-9._-]+
-          cp "out/מקריא-ל-MP3.apk" "$RUNNER_TEMP/MP3Reader.apk"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout --orphan apk-download
-          git clean -fd
-          cp "$RUNNER_TEMP/MP3Reader.apk" MP3Reader.apk
-          git add -f MP3Reader.apk
-          git commit -m "Publish standalone APK download"
-          git push --force origin HEAD:apk-download
-; then
-            echo "External file host did not return a valid direct URL."
-            echo "$APK_URL"
-            exit 1
-          fi
+          case "$APK_URL" in
+            https://files.catbox.moe/*) ;;
+            *) echo "External host returned an invalid URL: $APK_URL"; exit 1 ;;
+          esac
           printf '%s\n' "$APK_URL" > MP3DownloadURL.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
