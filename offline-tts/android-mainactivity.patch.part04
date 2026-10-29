@@ -1,0 +1,80 @@
++        outputCard.addView(etRepl)
++        btnConvert = button("⇩  המר ושמור כ‑MP3") { onConvert() }
++        outputCard.addView(btnConvert)
+         pb = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+-            max = 100; visibility = View.GONE
++            max = 100; visibility = View.GONE; progressTintList = android.content.res.ColorStateList.valueOf(Color.rgb(76, 229, 205))
++        }
++        outputCard.addView(pb)
++        tvStatus = TextView(this).apply {
++            setTextColor(Color.rgb(192, 208, 233)); textSize = 12f
++            setPadding(0, dp(8), 0, 0)
+         }
+-        col.addView(pb)
+-        tvStatus = TextView(this).apply { setPadding(0, dp(6), 0, 0) }
+-        col.addView(tvStatus)
+-        btnCancel = button("בטל") {
++        outputCard.addView(tvStatus)
++        btnCancel = button("ביטול ההמרה") {
+             startService(Intent(this, ConvertService::class.java).setAction(ConvertService.ACTION_CANCEL))
+-        }.apply { visibility = View.GONE }
+-        col.addView(btnCancel)
+-
+-        spBitrate.setSelection(prefs.getInt("bitrate", 2))
+-        spSplit.setSelection(prefs.getInt("split", 0))
+-        spPause.setSelection(prefs.getInt("pause", 1))
++        }.apply { visibility = View.GONE; background = rounded(Color.rgb(255, 126, 154), radius = 12) }
++        outputCard.addView(btnCancel)
++        col.addView(outputCard)
++
++        spBitrate.setSelection(prefs.getInt("bitrate", 2).coerceIn(0, 4))
++        spSplit.setSelection(prefs.getInt("split", 0).coerceIn(0, 3))
++        spPause.setSelection(prefs.getInt("pause", 1).coerceIn(0, 3))
+         etRepl.setText(prefs.getString("repl", ""))
+ 
+         val seek = object : SeekBar.OnSeekBarChangeListener {
+             override fun onProgressChanged(s: SeekBar?, p: Int, u: Boolean) {
+-                tvSpeed.text = "מהירות: %.2fx".format(Locale.US, speed())
+-                tvPitch.text = "גובה צליל: %.2f".format(Locale.US, pitch())
++                tvSpeed.text = "מהירות דיבור  ·  %.2fx".format(Locale.US, speed())
++                tvPitch.text = "גובה צליל  ·  %.2fx".format(Locale.US, pitch())
+             }
+             override fun onStartTrackingTouch(s: SeekBar?) {}
+             override fun onStopTrackingTouch(s: SeekBar?) {}
+@@ -922,46 +1042,64 @@
+         sbSpeed.setOnSeekBarChangeListener(seek); sbPitch.setOnSeekBarChangeListener(seek)
+         seek.onProgressChanged(null, 0, false)
+ 
+-        if (Build.VERSION.SDK_INT >= 33 &&
+-            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
++        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
+ 
+         tts = TextToSpeech(this) { st ->
+             if (st == TextToSpeech.SUCCESS) loadVoices()
+-            else tvStatus.text = "מנוע הקראה לא זמין. התקן Speech Services by Google."
++            else tvStatus.text = "מנוע ההקראה לא זמין. בדוק שקול לדיבור מותקן במכשיר."
+         }
+     }
+ 
+     private fun loadVoices() {
+         val all = tts?.voices ?: emptySet()
+-        // רק קולות מקומיים שהותקנו, כדי שכלום לא יעבור דרך רשת
+-        voices = all.filter { !it.isNetworkConnectionRequired && !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
++        val installed = all.filter { !it.isNetworkConnectionRequired && !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
+             .sortedWith(compareBy({ it.locale.displayName }, { it.name }))
++        val choices = mutableListOf<VoiceChoice>()
++        for (v in installed) {
++            if (v.locale.language == "he") {
++                // eSpeak NG commonly provides one Hebrew voice; offer useful speech profiles
++                // rather than pretending to have four independent voice models.
++                choices += VoiceChoice(v, "עברית · טבעי", "natural", 1.0f, 1.0f)
++                choices += VoiceChoice(v, "עברית · רגוע", "calm", 0.90f, 0.92f)
++                choices += VoiceChoice(v, "עברית · ברור", "clear", 0.86f, 1.08f)
++                choices += VoiceChoice(v, "עברית · קריינות", "narration", 0.96f, 0.90f)
++            } else {
++                choices += VoiceChoice(v, "\${v.locale.getDisplayName(Locale.forLanguageTag("he"))} · \${v.name}")
++            }
++        }
++        voices = choices
++        if (voices.isEmpty()) {

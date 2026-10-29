@@ -1,0 +1,74 @@
++            text = "סטודיו אישי להקראת מסמכים בעברית ובשפות נוספות"
++            textSize = 13f; setTextColor(Color.rgb(156, 173, 202)); setPadding(0, dp(5), 0, 0)
+         })
+-        tvFile = TextView(this).apply { text = "לא נבחר קובץ"; setPadding(0, dp(6), 0, dp(6)) }
+-        col.addView(tvFile)
+-        cbResume = CheckBox(this).apply { visibility = View.GONE }
+-        col.addView(cbResume)
+-        etPaste = multiline("או הדבק טקסט כאן", 3)
+-        col.addView(etPaste)
+-
+-        col.addView(label("קול (קולות מקומיים בלבד)"))
+-        spVoice = Spinner(this)
+-        col.addView(spVoice)
+-        col.addView(button("השמע דוגמה") { preview() })
++        col.addView(header)
+ 
++        val srcCard = section("01  ·  מקור הטקסט")
++        srcCard.addView(button("＋  בחירת קובץ להקראה") {
++            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*"), REQ_PICK)
++        })
++        tvFile = TextView(this).apply {
++            text = "לא נבחר קובץ"; textSize = 12f; setTextColor(Color.rgb(170, 190, 220))
++            setPadding(0, dp(7), 0, dp(5))
++        }
++        srcCard.addView(tvFile)
++        cbResume = CheckBox(this).apply { visibility = View.GONE; setTextColor(Color.WHITE) }
++        srcCard.addView(cbResume)
++        etPaste = multiline("או הדבק כאן טקסט בעברית, באנגלית ובמספרים כגון 123", 4)
++        srcCard.addView(etPaste)
++        col.addView(srcCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
++
++        val voiceCard = section("02  ·  קול והגייה")
++        voiceCard.addView(label("קול או סגנון דיבור (ללא צורך באינטרנט)"))
++        spVoice = Spinner(this); spVoice.background = rounded(Color.rgb(9, 18, 37), Color.rgb(42, 61, 95), 10)
++        voiceCard.addView(spVoice)
++        voiceCard.addView(button("▶  השמעת דוגמת קול") { preview() })
+         tvSpeed = label("")
+-        sbSpeed = SeekBar(this).apply { max = 150; progress = prefs.getInt("speed", 50) }
++        sbSpeed = SeekBar(this).apply { max = 150; progress = prefs.getInt("speed", 50); progressTintList = android.content.res.ColorStateList.valueOf(Color.rgb(76, 229, 205)); thumbTintList = android.content.res.ColorStateList.valueOf(Color.rgb(76, 229, 205)) }
+         tvPitch = label("")
+-        sbPitch = SeekBar(this).apply { max = 150; progress = prefs.getInt("pitch", 50) }
+-        col.addView(tvSpeed); col.addView(sbSpeed); col.addView(tvPitch); col.addView(sbPitch)
++        sbPitch = SeekBar(this).apply { max = 150; progress = prefs.getInt("pitch", 50); progressTintList = android.content.res.ColorStateList.valueOf(Color.rgb(114, 155, 255)); thumbTintList = android.content.res.ColorStateList.valueOf(Color.rgb(114, 155, 255)) }
++        voiceCard.addView(tvSpeed); voiceCard.addView(sbSpeed); voiceCard.addView(tvPitch); voiceCard.addView(sbPitch)
++        col.addView(voiceCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+ 
+-        col.addView(label("איכות MP3 (מונו)"))
++        val outputCard = section("03  ·  יצירת קובץ שמע")
++        outputCard.addView(label("איכות MP3 (מונו)"))
+         spBitrate = spinner(listOf(
+-            "32 kbps (הכי קטן, כ-14MB לשעה)", "48 kbps (כ-22MB לשעה)", "64 kbps (מומלץ, כ-29MB לשעה)",
+-            "96 kbps (כ-43MB לשעה)", "128 kbps (הכי איכותי, כ-58MB לשעה)"))
+-        col.addView(spBitrate)
+-        col.addView(label("פיצול הפלט לפרקים"))
++            "32 kbps · קובץ קטן", "48 kbps · חסכוני", "64 kbps · מומלץ",
++            "96 kbps · איכות גבוהה", "128 kbps · איכות מרבית"))
++        outputCard.addView(spBitrate)
++        outputCard.addView(label("פיצול הפלט לפרקים"))
+         spSplit = spinner(listOf("קובץ אחד", "פרק כל 30 דקות", "פרק כל שעה", "פרק כל שעתיים"))
+-        col.addView(spSplit)
+-        col.addView(label("הפסקה בין קטעים"))
++        outputCard.addView(spSplit)
++        outputCard.addView(label("הפסקה בין קטעים"))
+         spPause = spinner(listOf("ללא", "קצרה (0.3 שנ')", "בינונית (0.6 שנ')", "ארוכה (1 שנ')"))
+-        col.addView(spPause)
+-        col.addView(label("מילון הגייה (שורה לכל החלפה, מילה=הגייה)"))
+-        etRepl = multiline("ת\"א=תל אביב", 2)
+-        col.addView(etRepl)
+-
+-        btnConvert = button("המר ושמור כ-MP3 (בחירת תיקייה)") { onConvert() }
+-        col.addView(btnConvert)
++        outputCard.addView(spPause)
++        outputCard.addView(label("מילון הגייה אישי · מילה=הגייה"))
++        etRepl = multiline("לדוגמה: ת\"א=תל אביב", 2)
