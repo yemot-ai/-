@@ -1,0 +1,73 @@
+name: Publish MP3 reader outside GitHub
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/publish-mp3-external.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publish APK to external file host
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download APK artifact from the successful build
+        uses: actions/download-artifact@v4
+        with:
+          name: מקריא-ל-MP3-Android-APK
+          path: incoming
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 40913184250
+
+      - name: Upload APK to a non-GitHub file host
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="incoming/מקריא-ל-MP3.apk"
+          test -s "$APK"
+          APK_URL=""
+          HOST=""
+
+          # Try Catbox first, using ZIP in case the host rejects raw APK files.
+          mkdir -p outgoing
+          zip -j -q outgoing/MP3Reader.zip "$APK"
+          if RESPONSE="$(curl --fail --silent --show-error --max-time 240 --retry 1 \
+            -F 'reqtype=fileupload' \
+            -F 'fileToUpload=@outgoing/MP3Reader.zip;filename=MP3Reader.zip;type=application/zip' \
+            https://catbox.moe/user/api.php 2>&1)"; then
+            case "$RESPONSE" in
+              https://files.catbox.moe/*) APK_URL="$RESPONSE"; HOST="Catbox ZIP" ;;
+            esac
+          fi
+
+          # If Catbox is unavailable, try a 48-hour temporary link with the raw APK.
+          if [ -z "$APK_URL" ]; then
+            RESPONSE="$(curl --fail --silent --show-error --max-time 300 --retry 1 \
+              -F "file=@$APK;filename=MP3Reader.apk" \
+              -F "expire=172800" \
+              https://tmpfiles.org/api/v1/upload)"
+            APK_URL="$(printf '%s' "$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("data",{}).get("url",""))')"
+            case "$APK_URL" in
+              https://tmpfiles.org/*)
+                APK_URL="${APK_URL/https:\/\/tmpfiles.org\//https:\/\/tmpfiles.org\/dl\/}"
+                HOST="tmpfiles.org (expires within 48 hours)"
+                ;;
+              *) echo "Unusable response from temporary host: $RESPONSE"; exit 1 ;;
+            esac
+          fi
+
+          printf 'Link type: %s\nURL: %s\n' "$HOST" "$APK_URL" > MP3DownloadURL.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f MP3DownloadURL.txt
+          git commit -m "Record external MP3 reader download URL"
+          git push origin HEAD:main
+          echo "External host: $HOST"
+          echo "External URL: $APK_URL"
