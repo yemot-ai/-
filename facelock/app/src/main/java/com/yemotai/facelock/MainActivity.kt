@@ -109,7 +109,7 @@ class MainActivity : Activity() {
     }
     private fun launchableApps():List<Pair<String,String>> {
         val intent=Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        val matches:List<ResolveInfo>=packageManager.queryIntentActivities(intent,0)
+        val matches: List<ResolveInfo> =packageManager.queryIntentActivities(intent,0)
         val home=packageManager.resolveActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),0)?.activityInfo?.packageName
         val excluded=setOf(packageName,"com.android.settings","com.android.systemui","com.android.phone","com.android.dialer","com.android.emergency")
         val unique=LinkedHashMap<String,String>()
