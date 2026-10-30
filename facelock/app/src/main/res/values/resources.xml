@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FaceLock Pro</string>
+    <string name="admin_description">מאפשר ל-FaceLock Pro לבקש מ-Android לנעול את המכשיר. פתיחת המכשיר נשארת בשליטת Android.</string>
+    <color name="launcher_bg">#081226</color>
+    <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:colorAccent">#45E1D0</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">#081226</item>
+        <item name="android:navigationBarColor">#081226</item>
+        <item name="android:windowBackground">#081226</item>
+    </style>
+    <style name="AuthTheme" parent="@style/AppTheme">
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowShowWhenLocked">false</item>
+    </style>
+</resources>
