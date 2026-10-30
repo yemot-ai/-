@@ -55,6 +55,8 @@ jobs:
               print(f"Validated FaceLock source ZIP: {p.stat().st_size} bytes, {len(names)} files")
           PY
           unzip -q /tmp/FaceLockAndroidProject.zip -d /tmp/facelock-unpack
+          # Android uses textColorHint; hintTextColor is not a valid framework XML attribute.
+          find /tmp/facelock-unpack -type f -name '*.xml' -exec sed -i 's/android:hintTextColor/android:textColorHint/g' {} +
           cp -a /tmp/facelock-unpack/. facelock-android/
 
       - name: Set up JDK 17
