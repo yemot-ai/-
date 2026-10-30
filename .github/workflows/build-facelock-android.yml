@@ -65,7 +65,7 @@ jobs:
           if "import android.widget.Button" not in source:
               source = source.replace(
                   "package com.yemotai.facelock",
-                  "package com.yemotai.facelock\\n\\nimport android.widget.Button",
+                  "package com.yemotai.facelock\n\nimport android.widget.Button",
                   1,
               )
           service.write_text(source)
