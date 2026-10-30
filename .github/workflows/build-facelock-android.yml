@@ -55,8 +55,33 @@ jobs:
               print(f"Validated FaceLock source ZIP: {p.stat().st_size} bytes, {len(names)} files")
           PY
           unzip -q /tmp/FaceLockAndroidProject.zip -d /tmp/facelock-unpack
-          # Android uses textColorHint; hintTextColor is not a valid framework XML attribute.
+          # Repair small Android source compatibility issues before compilation.
           find /tmp/facelock-unpack -type f -name '*.xml' -exec sed -i 's/android:hintTextColor/android:textColorHint/g' {} +
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("/tmp/facelock-unpack")
+          service = root / "app/src/main/java/com/yemotai/facelock/AppMonitorService.kt"
+          source = service.read_text()
+          if "import android.widget.Button" not in source:
+              source = source.replace(
+                  "package com.yemotai.facelock",
+                  "package com.yemotai.facelock\\n\\nimport android.widget.Button",
+                  1,
+              )
+          service.write_text(source)
+
+          main = root / "app/src/main/java/com/yemotai/facelock/MainActivity.kt"
+          source = main.read_text()
+          source = source.replace(
+              "val text = label(profile.name, 14, 0xFFF3F8FF.toInt())",
+              "val profileLabel = label(profile.name, 14, 0xFFF3F8FF.toInt())",
+          )
+          source = source.replace(
+              "row.addView(text, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))",
+              "row.addView(profileLabel, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))",
+          )
+          main.write_text(source)
+          PY
           cp -a /tmp/facelock-unpack/. facelock-android/
 
       - name: Set up JDK 17
