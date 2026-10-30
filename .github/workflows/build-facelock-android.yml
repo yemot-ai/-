@@ -18,42 +18,41 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Reconstruct Android source archive
+      - name: Reconstruct and validate Android source archive
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p /tmp/facelock-unpack
+          {
+            head -c 5500 facelock-android/source-parts-v5/part01.b64
+            cat facelock-android/source-parts-v5/part02.b64
+            cat facelock-android/source-parts-v5/part03a.b64
+            cat facelock-android/source-parts-v5/part03b.b64
+            cat facelock-android/source-parts-v6/part04.b64
+            cat facelock-android/source-parts-v6/part05.b64
+            cat facelock-android/source-parts-v6/part06.b64
+            cat facelock-android/source-parts-v6/part07.b64
+            cat facelock-android/source-parts-v6/part08a.b64
+            cat facelock-android/source-parts-v6/part08b.b64
+          } | tr -d '\r\n ' | base64 --decode > /tmp/FaceLockAndroidProject.zip
+          unzip -t /tmp/FaceLockAndroidProject.zip
           python3 - <<'PY'
-          import base64, io, pathlib, struct, zipfile
-          encoded = pathlib.Path("facelock-android/source-parts/part01.b64").read_text().strip()
-          raw = base64.b64decode(encoded)
-          candidates = []
-          start = 0
-          while True:
-              pos = raw.find(b"PK\x05\x06", start)
-              if pos < 0:
-                  break
-              if pos + 22 <= len(raw):
-                  comment_len = struct.unpack_from("<H", raw, pos + 20)[0]
-                  end = pos + 22 + comment_len
-                  if end <= len(raw):
-                      candidates.append(raw[:end])
-              start = pos + 4
-          for candidate in reversed(candidates):
-              try:
-                  with zipfile.ZipFile(io.BytesIO(candidate)) as archive:
-                      names = set(archive.namelist())
-                      required = {"settings.gradle.kts", "build.gradle.kts", "app/build.gradle.kts",
-                                  "app/src/main/AndroidManifest.xml",
-                                  "app/src/main/java/com/yemotai/facelock/MainActivity.kt"}
-                      if required.issubset(names) and archive.testzip() is None:
-                          pathlib.Path("/tmp/FaceLockAndroidProject.zip").write_bytes(candidate)
-                          print("Validated Android source archive:", len(candidate), "bytes")
-                          break
-              except Exception:
-                  pass
-          else:
-              raise SystemExit("The source archive did not validate. The FaceLock source bundle needs repair.")
+          import pathlib, zipfile
+          p = pathlib.Path("/tmp/FaceLockAndroidProject.zip")
+          with zipfile.ZipFile(p) as z:
+              names = set(z.namelist())
+              required = {
+                  "settings.gradle.kts", "build.gradle.kts", "app/build.gradle.kts",
+                  "app/src/main/AndroidManifest.xml",
+                  "app/src/main/java/com/yemotai/facelock/MainActivity.kt",
+                  "app/src/main/java/com/yemotai/facelock/FaceCaptureActivity.kt",
+              }
+              missing = required - names
+              if missing:
+                  raise SystemExit("Missing required source files: " + ", ".join(sorted(missing)))
+              if z.testzip() is not None:
+                  raise SystemExit("ZIP CRC validation failed")
+              print(f"Validated FaceLock source ZIP: {p.stat().st_size} bytes, {len(names)} files")
           PY
           unzip -q /tmp/FaceLockAndroidProject.zip -d /tmp/facelock-unpack
           cp -a /tmp/facelock-unpack/. facelock-android/
@@ -69,7 +68,7 @@ jobs:
         with:
           gradle-version: "8.9"
 
-      - name: Download bundled offline face model
+      - name: Download and bundle offline face model
         shell: bash
         run: |
           set -euo pipefail
@@ -81,19 +80,22 @@ jobs:
           MODEL="$(find /tmp/face-model -type f -iname 'mobilefacenet.tflite' -print -quit)"
           if [ -z "$MODEL" ]; then
             echo "MobileFaceNet model not found in package archive." >&2
-            find /tmp/face-model -type f -iname '*.tflite' | head -80
+            find /tmp/face-model -type f | head -100
             exit 1
           fi
           cp "$MODEL" facelock-android/app/src/main/assets/mobilefacenet.tflite
           test -s facelock-android/app/src/main/assets/mobilefacenet.tflite
 
-      - name: Build APK
+      - name: Build and validate APK
         working-directory: facelock-android
         run: |
+          set -euo pipefail
           gradle --no-daemon --stacktrace assembleDebug
-          test -s app/build/outputs/apk/debug/app-debug.apk
-          unzip -t app/build/outputs/apk/debug/app-debug.apk | tail -n 1
-          unzip -l app/build/outputs/apk/debug/app-debug.apk | grep -q 'assets/mobilefacenet.tflite'
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          unzip -t "$APK" | tail -n 1
+          unzip -l "$APK" | grep -q 'assets/mobilefacenet.tflite'
+          ls -lh "$APK"
 
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
@@ -111,7 +113,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload unpacked source project
+      - name: Upload Android source project
         uses: actions/upload-artifact@v4
         with:
           name: FACELOCK-SOURCE-PROJECT
