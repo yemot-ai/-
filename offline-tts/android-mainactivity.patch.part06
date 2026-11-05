@@ -1,4 +1,4 @@
-+            .putExtra("folder", folder.toString()).putExtra("voice", selectedVoice()?.voice?.name)
++            .putExtra("folder", folder.toString()).putExtra("voice", selectedVoice()?.let { choice -> choice.voice?.name ?: "LANG:" + (choice.locale ?: Locale.forLanguageTag("he")).toLanguageTag() })
 +            .putExtra("rate", (speed() * (selectedVoice()?.rateFactor ?: 1f)).coerceIn(0.1f, 2.0f))
 +            .putExtra("pitch", (pitch() * (selectedVoice()?.pitchFactor ?: 1f)).coerceIn(0.5f, 2.0f))
              .putExtra("kbps", bitrates[spBitrate.selectedItemPosition])
