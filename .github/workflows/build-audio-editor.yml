@@ -74,6 +74,30 @@ jobs:
           test -s "$PROJECT/app/src/main/java/com/example/audioeditor/MainActivity.kt"
           echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
 
+      - name: Resolve legacy LAME manifest merger conflict
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path(__import__("os").environ["PROJECT_DIR"]) / "app/src/main/AndroidManifest.xml"
+          s = p.read_text()
+          android_ns = 'xmlns:android="http://schemas.android.com/apk/res/android"'
+          tools_ns = 'xmlns:tools="http://schemas.android.com/tools"'
+          if tools_ns not in s:
+              s = s.replace(android_ns, android_ns + " " + tools_ns, 1)
+          if 'tools:replace="android:allowBackup"' not in s:
+              s = s.replace(
+                  'android:allowBackup="false"',
+                  'android:allowBackup="false"\n        tools:replace="android:allowBackup"',
+                  1
+              )
+          if tools_ns not in s or 'tools:replace="android:allowBackup"' not in s:
+              raise SystemExit("Could not apply the manifest merger override")
+          p.write_text(s)
+          PY
+          grep -q 'tools:replace="android:allowBackup"' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+
       - name: Build installable debug APK
         shell: bash
         run: |
