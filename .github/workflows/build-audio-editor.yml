@@ -74,7 +74,7 @@ jobs:
           test -s "$PROJECT/app/src/main/java/com/example/audioeditor/MainActivity.kt"
           echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
 
-      - name: Prepare LAME, Android manifest and Compose pointer handling
+      - name: Prepare LAME, Android manifest, Compose and Kotlin settings
         shell: bash
         run: |
           set -euo pipefail
@@ -122,11 +122,49 @@ jobs:
           elif new_drag not in w:
               raise SystemExit("Could not update Compose pointer delta calculation")
           waveform.write_text(w)
+
+          settings = root / "app/src/main/java/com/example/audioeditor/AppSettings.kt"
+          st = settings.read_text()
+          method_renames = {
+              "fun setThemeMode(": "fun updateThemeMode(",
+              "fun setHaptics(": "fun updateHaptics(",
+              "fun setLayoutMode(": "fun updateLayoutMode(",
+              "fun setDefaultBitrate(": "fun updateDefaultBitrate(",
+              "fun setDefaultFormat(": "fun updateDefaultFormat(",
+              "fun setDefaultSampleRate(": "fun updateDefaultSampleRate(",
+              "fun setFolder(": "fun updateFolder(",
+          }
+          for old_name, new_name in method_renames.items():
+              if old_name in st:
+                  st = st.replace(old_name, new_name, 1)
+              elif new_name not in st:
+                  raise SystemExit(f"Missing expected settings method: {old_name}")
+          settings.write_text(st)
+
+          ui = root / "app/src/main/java/com/example/audioeditor/SettingsUi.kt"
+          u = ui.read_text()
+          call_renames = {
+              "s.setThemeMode(": "s.updateThemeMode(",
+              "s.setHaptics(": "s.updateHaptics(",
+              "s.setLayoutMode(": "s.updateLayoutMode(",
+              "s.setDefaultBitrate(": "s.updateDefaultBitrate(",
+              "s.setDefaultFormat(": "s.updateDefaultFormat(",
+              "s.setDefaultSampleRate(": "s.updateDefaultSampleRate(",
+              "s.setFolder(": "s.updateFolder(",
+          }
+          for old_call, new_call in call_renames.items():
+              if old_call in u:
+                  u = u.replace(old_call, new_call, 1)
+              elif new_call not in u:
+                  raise SystemExit(f"Missing expected settings call site: {old_call}")
+          ui.write_text(u)
           PY
           grep -q 'tools:replace="android:allowBackup"' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
           grep -q 'android:appCategory="audio"' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
           grep -q 'exclude(group = "com.android.support")' "$PROJECT_DIR/app/build.gradle.kts"
           grep -q '(ch.position - ch.previousPosition).x' "$PROJECT_DIR/app/src/main/java/com/example/audioeditor/WaveformView.kt"
+          grep -q 'fun updateThemeMode(' "$PROJECT_DIR/app/src/main/java/com/example/audioeditor/AppSettings.kt"
+          grep -q 's.updateThemeMode(' "$PROJECT_DIR/app/src/main/java/com/example/audioeditor/SettingsUi.kt"
 
       - name: Build installable debug APK
         shell: bash
