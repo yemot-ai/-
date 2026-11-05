@@ -74,14 +74,16 @@ jobs:
           test -s "$PROJECT/app/src/main/java/com/example/audioeditor/MainActivity.kt"
           echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
 
-      - name: Resolve legacy LAME manifest merger conflict
+      - name: Prepare legacy LAME library for AndroidX
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          p = Path(__import__("os").environ["PROJECT_DIR"]) / "app/src/main/AndroidManifest.xml"
-          s = p.read_text()
+          import os
+          root = Path(os.environ["PROJECT_DIR"])
+          manifest = root / "app/src/main/AndroidManifest.xml"
+          s = manifest.read_text()
           android_ns = 'xmlns:android="http://schemas.android.com/apk/res/android"'
           tools_ns = 'xmlns:tools="http://schemas.android.com/tools"'
           if tools_ns not in s:
@@ -93,10 +95,23 @@ jobs:
                   1
               )
           if tools_ns not in s or 'tools:replace="android:allowBackup"' not in s:
-              raise SystemExit("Could not apply the manifest merger override")
-          p.write_text(s)
+              raise SystemExit("Could not apply manifest merger override")
+          manifest.write_text(s)
+
+          gradle = root / "app/build.gradle.kts"
+          g = gradle.read_text()
+          old = 'implementation("com.github.naman14:TAndroidLame:1.1")'
+          new = '''implementation("com.github.naman14:TAndroidLame:1.1") {
+              exclude(group = "com.android.support")
+          }'''
+          if old in g:
+              g = g.replace(old, new, 1)
+          elif new not in g:
+              raise SystemExit("Could not exclude legacy support libraries from TAndroidLame")
+          gradle.write_text(g)
           PY
           grep -q 'tools:replace="android:allowBackup"' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          grep -q 'exclude(group = "com.android.support")' "$PROJECT_DIR/app/build.gradle.kts"
 
       - name: Build installable debug APK
         shell: bash
