@@ -1,0 +1,115 @@
+name: Build עריכת אודיאו Android APK
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "audio-editor-build/source/tar-p*.b64"
+      - ".github/workflows/build-audio-editor.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify עריכת אודיאו
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out project sources
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Android SDK 35
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_DIR="/usr/local/lib/android/sdk"
+          SDKMANAGER="$(find "$SDK_DIR/cmdline-tools" -type f -name sdkmanager 2>/dev/null | sort | tail -n 1)"
+          if [ -z "$SDKMANAGER" ]; then
+            echo "Android sdkmanager not found under $SDK_DIR"
+            exit 1
+          fi
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Reconstruct the compact Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="$RUNNER_TEMP/AudioStudioMin.tar.xz"
+          cat \
+            audio-editor-build/source/tar-p01.b64 \
+            audio-editor-build/source/tar-p02.b64 \
+            audio-editor-build/source/tar-p03.b64 \
+            audio-editor-build/source/tar-p04.b64 \
+            audio-editor-build/source/tar-p05.b64 \
+            audio-editor-build/source/tar-p06.b64 \
+            audio-editor-build/source/tar-p07.b64 \
+            audio-editor-build/source/tar-p08.b64 \
+            audio-editor-build/source/tar-p09.b64 \
+            audio-editor-build/source/tar-p10.b64 \
+            audio-editor-build/source/tar-p11.b64 \
+            | tr -d '\r\n ' | base64 --decode > "$ARCHIVE"
+          xz --test "$ARCHIVE"
+          tar -xJf "$ARCHIVE" -C "$RUNNER_TEMP"
+          PROJECT="$RUNNER_TEMP/AudioStudioMin"
+          test -s "$PROJECT/settings.gradle.kts"
+          test -s "$PROJECT/app/build.gradle.kts"
+          test -s "$PROJECT/app/src/main/AndroidManifest.xml"
+          test -s "$PROJECT/app/src/main/java/com/example/audioeditor/MainActivity.kt"
+          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Build installable debug APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --stacktrace -p "$PROJECT_DIR" assembleDebug
+
+      - name: Verify APK structure, package, Android version and signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          unzip -t "$APK" | tail -n 1
+          unzip -l "$APK" | grep -q 'classes.dex'
+          unzip -l "$APK" | grep -q 'AndroidManifest.xml'
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" > "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "package: name='com.example.audioeditor'" "$RUNNER_TEMP/apk-badging.txt"
+          grep -q "sdkVersion:'29'" "$RUNNER_TEMP/apk-badging.txt"
+          "$BUILD_TOOLS/apksigner" verify --verbose "$APK"
+          cp "$APK" "$RUNNER_TEMP/עריכת-אודיאו-Android-10-plus.apk"
+          sha256sum "$RUNNER_TEMP/עריכת-אודיאו-Android-10-plus.apk"
+          ls -lh "$RUNNER_TEMP/עריכת-אודיאו-Android-10-plus.apk"
+
+      - name: Upload verified APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Audio-Editor-Android-APK
+          path: ${{ runner.temp }}/עריכת-אודיאו-Android-10-plus.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload reconstructed source for reproducibility
+        uses: actions/upload-artifact@v4
+        with:
+          name: Audio-Editor-Android-Source
+          path: ${{ runner.temp }}/AudioStudioMin.tar.xz
+          if-no-files-found: error
+          retention-days: 30
