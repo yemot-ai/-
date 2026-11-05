@@ -629,10 +629,38 @@
       await new Promise((resolve,reject)=>{let last=performance.now();const render=now=>{if(state.exportCancel){try{exportRecorder.stop();}catch{}return resolve();}const t=Math.min(total,(now-start)/1000);state.currentTime=t;const active=activeClipAt(t);syncPreviewMedia(t,true);state.audios.forEach(a=>{const m=mediaById(a.mediaId);if(!m||m.kind!=='audio')return;const el=m.element,inRange=t>=a.start&&t<a.start+a.duration;if(inRange){const local=t-a.start,pos=(Number(a.sourceStart)||0)+local*(Number(a.speed)||1);if(Math.abs(el.currentTime-pos)>.65){try{el.currentTime=pos;}catch{}}el.playbackRate=clamp(Number(a.speed)||1,.5,2);const volume=audioVolumeAt(a,t),nodes=audioNodes.get(a.mediaId);if(nodes?.gain&&audioContext){nodes.gain.gain.setValueAtTime(volume,audioContext.currentTime);if(nodes.pan)nodes.pan.pan.setValueAtTime(clamp((Number(a.pan)||0)/100,-1,1),audioContext.currentTime);el.volume=1;}else el.volume=volume;el.play().catch(()=>{});}else{el.pause();const nodes=audioNodes.get(a.mediaId);if(nodes?.gain&&audioContext)nodes.gain.gain.setValueAtTime(0,audioContext.currentTime);}});renderTo(exportCtx,t,exportCanvas.width,exportCanvas.height);$('exportProgress').style.width=`${Math.min(100,t/total*100)}%`;$('exportStatus').textContent=`מייצא ${fmt(t)} / ${fmt(total)}`;$('exportStatusDetail').textContent=active?(mediaById(active.mediaId)?.name||'סצנת דוגמה'):'מרנדר שכבות';if(t>=total){$('exportProgress').style.width='100%';setTimeout(()=>{try{exportRecorder.requestData();}catch{}try{exportRecorder.stop();}catch{}resolve();},350);return;}last=now;requestAnimationFrame(render);};requestAnimationFrame(render);});
       await stopped;state.media.filter(m=>m.kind==='video').forEach(m=>{m.element.pause();m.element.muted=true;m.element.volume=0;});state.audios.forEach(a=>mediaById(a.mediaId)?.element.pause());state.exporting=false;
       if(state.exportCancel){$('exportStatus').textContent='הייצוא בוטל';$('exportStatusDetail').textContent='אפשר להתחיל ייצוא חדש מתי שתרצה.';return;}
-      const blob=new Blob(exportChunks,{type:exportRecorder.mimeType||'video/webm'});if(!blob.size)throw new Error('לא נוצר קובץ וידאו');if(exportUrl)URL.revokeObjectURL(exportUrl);exportUrl=URL.createObjectURL(blob);$('exportProgress').style.width='100%';$('exportStatus').textContent='הסרטון מוכן!';$('exportStatusDetail').textContent=`${(blob.size/1024/1024).toFixed(1)} MB · WebM · ${exportCanvas.width} × ${exportCanvas.height} · ${exportFps} FPS`;$('exportSpinner').classList.remove('spinning');$('cancelExportBtn').classList.add('hidden');$('downloadExportBtn').classList.remove('hidden');$('downloadExportBtn').onclick=async()=>{const ok=await downloadBlob(blob,`${safeFileName()}.webm`);if(ok)notify('קובץ הווידאו הורד');};notify('הייצוא הסתיים בהצלחה');
+      const blob=new Blob(exportChunks,{type:exportRecorder.mimeType||'video/webm'});if(!blob.size)throw new Error('לא נוצר קובץ וידאו');if(exportUrl)URL.revokeObjectURL(exportUrl);exportUrl=URL.createObjectURL(blob);
+      const nativeMp4=window.CUTLABNative&&typeof window.CUTLABNative.beginMp4Export==='function'&&typeof window.CUTLABNative.writeMp4Chunk==='function'&&typeof window.CUTLABNative.finishMp4Export==='function';
+      $('exportProgress').style.width='100%';$('exportSpinner').classList.remove('spinning');
+      if(nativeMp4){
+        const bridge=window.CUTLABNative,mp4Name=`${safeFileName()}.mp4`;
+        if(!bridge.beginMp4Export(mp4Name))throw new Error('לא ניתן להכין קובץ MP4 זמני במכשיר');
+        try{
+          for(let offset=0;offset<blob.size;offset+=256*1024){
+            const bytes=new Uint8Array(await blob.slice(offset,offset+256*1024).arrayBuffer());let bin='';
+            for(let i=0;i<bytes.length;i++)bin+=String.fromCharCode(bytes[i]);
+            if(!bridge.writeMp4Chunk(btoa(bin)))throw new Error('העברת נתוני הווידאו לממיר MP4 נכשלה');
+          }
+          window.__cutlabNativeMp4Finished=(success,message)=>{
+            state.nativeExporting=false;$('exportSpinner').classList.remove('spinning');$('cancelExportBtn').textContent='סגירה';
+            if(success){$('exportStatus').textContent='הסרטון נשמר כ-MP4';$('exportStatusDetail').textContent=message||'קובץ MP4 נשמר במיקום שבחרת';notify('הייצוא ל-MP4 הסתיים בהצלחה');}
+            else{$('exportStatus').textContent='ייצוא MP4 לא הושלם';$('exportStatusDetail').textContent=message||'לא ניתן ליצור קובץ MP4 במכשיר הזה';notify('ייצוא MP4 נכשל','error',5000);}
+          };
+          if(!bridge.finishMp4Export())throw new Error('לא ניתן להתחיל המרה ל-MP4');
+          state.nativeExporting=true;state.exporting=false;
+          $('exportStatus').textContent='ממיר את הסרטון ל-MP4 במכשיר…';
+          $('exportStatusDetail').textContent='ההמרה מתבצעת באמצעות מקודד הווידאו של Android. בסיום תתבקש לבחור היכן לשמור את הקובץ.';
+          $('cancelExportBtn').textContent='ביטול';$('cancelExportBtn').classList.remove('hidden');$('downloadExportBtn').classList.add('hidden');
+          return;
+        }catch(nativeError){try{bridge.cancelMp4Export();}catch{}throw nativeError;}
+      }
+      $('exportStatus').textContent='הסרטון מוכן להורדה';
+      $('exportStatusDetail').textContent=`${(blob.size/1024/1024).toFixed(1)} MB · WebM · ${exportCanvas.width} × ${exportCanvas.height} · ${exportFps} FPS. בגרסת Android הקובץ מומר ונשמר כ-MP4.`;
+      $('cancelExportBtn').classList.add('hidden');$('downloadExportBtn').classList.remove('hidden');
+      $('downloadExportBtn').onclick=async()=>{const ok=await downloadBlob(blob,`${safeFileName()}.webm`);if(ok)notify('קובץ WebM הורד');};notify('הייצוא הסתיים בהצלחה');
     }catch(e){console.error(e);state.exporting=false;$('exportSpinner').classList.remove('spinning');$('exportStatus').textContent='הייצוא לא הושלם';$('exportStatusDetail').textContent=e.message||'שגיאה בעת יצירת הסרטון';$('cancelExportBtn').textContent='סגירה';notify(`שגיאת ייצוא: ${e.message||'לא ידועה'}`,'error',5000);}
   }
-  function closeExport(){if(state.exporting){state.exportCancel=true;try{exportRecorder?.stop();}catch{};}else $('exportModal').classList.add('hidden');}
+  function closeExport(){if(state.exporting){state.exportCancel=true;try{exportRecorder?.stop();}catch{};}else if(state.nativeExporting){try{window.CUTLABNative?.cancelMp4Export?.();}catch{}state.nativeExporting=false;$('exportModal').classList.add('hidden');}else $('exportModal').classList.add('hidden');}
 
   function stagePointerDown(e){const r=canvas.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*100,y=(e.clientY-r.top)/r.height*100;const ss=state.stickers.filter(s=>state.currentTime>=s.start&&state.currentTime<=s.start+s.duration).slice().reverse().find(s=>Math.abs(s.x-x)<Math.max(4,(Number(s.size)||100)/720*65)&&Math.abs(s.y-y)<Math.max(4,(Number(s.size)||100)/720*65));const tt=state.texts.filter(l=>state.currentTime>=l.start&&state.currentTime<=l.start+l.duration).slice().reverse().find(l=>Math.abs(l.x-x)<40&&Math.abs(l.y-y)<18);const type=ss?'sticker':tt?'text':'';const id=ss?.id||tt?.id||'';if(!type)return;if(state.selected.type!==type||state.selected.id!==id)selectLayer(type,id);const obj=type==='sticker'?stickerById(id):textById(id);if(!obj)return;stageDrag={type,id,startX:e.clientX,startY:e.clientY,origX:Number(obj.x)||50,origY:Number(obj.y)||50};canvas.style.cursor='grabbing';try{canvas.setPointerCapture(e.pointerId);}catch{}}
   function stagePointerMove(e){if(!stageDrag)return;const obj=stageDrag.type==='sticker'?stickerById(stageDrag.id):textById(stageDrag.id);if(!obj)return;const r=canvas.getBoundingClientRect();obj.x=clamp(stageDrag.origX+(e.clientX-stageDrag.startX)/r.width*100,2,98);obj.y=clamp(stageDrag.origY+(e.clientY-stageDrag.startY)/r.height*100,2,98);if(stageDrag.type==='sticker'){$('stickerX').value=obj.x;$('stickerY').value=obj.y;}else{$('textX').value=obj.x;$('textY').value=obj.y;}draw();renderTimeline();}
