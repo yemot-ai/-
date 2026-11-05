@@ -32,6 +32,8 @@ jobs:
           NODE
           node --check /tmp/poster-studio.js
           test -s poster-studio/android/app/src/main/java/com/yemotai/posterstudio/MainActivity.java
+          grep -q 'android:label="סטודיו מודעות"' poster-studio/android/app/src/main/AndroidManifest.xml
+          grep -q 'applicationId = "com.yemotai.posterstudio.repaired"' poster-studio/android/app/build.gradle.kts
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
