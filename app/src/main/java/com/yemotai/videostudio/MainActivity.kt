@@ -15,6 +15,15 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.transformer.Transformer
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.io.OutputStream
 
 class MainActivity : Activity() {
@@ -24,6 +33,15 @@ class MainActivity : Activity() {
     private val saveRequestCode = 4108
     private val saveLock = Any()
     private var saveStream: OutputStream? = null
+
+    private val mp4Lock = Any()
+    private val mp4SaveRequestCode = 4109
+    private var mp4InputStream: FileOutputStream? = null
+    private var mp4InputFile: File? = null
+    private var mp4OutputFile: File? = null
+    private var mp4DisplayName: String = "סרטון.mp4"
+    private var mp4SaveFile: File? = null
+    private var mp4Transformer: Transformer? = null
 
     private inner class CutlabBridge {
         @JavascriptInterface
@@ -48,6 +66,74 @@ class MainActivity : Activity() {
                 try { saveStream?.flush() } catch (_: Exception) { }
                 try { saveStream?.close() } catch (_: Exception) { }
                 saveStream = null
+            }
+        }
+
+        // The editor renders a WebM intermediate in WebView. Media3 converts it
+        // with Android's native codecs and MP4 muxer, so the saved file is a real MP4.
+        @JavascriptInterface
+        fun beginMp4Export(name: String): Boolean = synchronized(mp4Lock) {
+            try {
+                cleanupMp4FilesLocked()
+                val clean = name.substringAfterLast('/').substringAfterLast('\\')
+                    .replace(Regex("[\\r\\n\\u0000]"), "_")
+                    .let { if (it.endsWith(".mp4", true)) it else "$it.mp4" }
+                    .ifBlank { "סרטון.mp4" }
+                val id = System.currentTimeMillis()
+                val input = File(cacheDir, "cutlab-$id.webm")
+                val output = File(cacheDir, "cutlab-$id.mp4")
+                mp4DisplayName = clean
+                mp4InputFile = input
+                mp4OutputFile = output
+                mp4InputStream = FileOutputStream(input)
+                true
+            } catch (_: Exception) {
+                cleanupMp4FilesLocked()
+                false
+            }
+        }
+
+        @JavascriptInterface
+        fun writeMp4Chunk(encodedChunk: String): Boolean = synchronized(mp4Lock) {
+            val output = mp4InputStream ?: return@synchronized false
+            try {
+                output.write(Base64.decode(encodedChunk, Base64.DEFAULT))
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        @JavascriptInterface
+        fun finishMp4Export(): Boolean {
+            val files = synchronized(mp4Lock) {
+                try {
+                    mp4InputStream?.flush()
+                    mp4InputStream?.close()
+                    mp4InputStream = null
+                } catch (_: Exception) {
+                    cleanupMp4FilesLocked()
+                    return false
+                }
+                val input = mp4InputFile
+                val output = mp4OutputFile
+                if (input == null || output == null || !input.isFile || input.length() < 128L) {
+                    cleanupMp4FilesLocked()
+                    return false
+                }
+                input to output
+            }
+            runOnUiThread { transcodeWebmToMp4(files.first, files.second) }
+            return true
+        }
+
+        @JavascriptInterface
+        fun cancelMp4Export() {
+            runOnUiThread {
+                try { mp4Transformer?.cancel() } catch (_: Exception) { }
+                mp4Transformer = null
+                synchronized(mp4Lock) { cleanupMp4FilesLocked() }
+                notifyMp4Finished(false, "הייצוא בוטל")
             }
         }
     }
@@ -158,6 +244,88 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun transcodeWebmToMp4(input: File, output: File) {
+        try {
+            if (!input.isFile || input.length() < 128L) {
+                notifyMp4Finished(false, "קובץ הביניים ריק או פגום")
+                return
+            }
+            if (output.exists()) output.delete()
+            val listener = object : Transformer.Listener {
+                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    mp4Transformer = null
+                    if (!output.isFile || output.length() < 128L) {
+                        notifyMp4Finished(false, "מנוע ההמרה לא יצר קובץ MP4 תקין")
+                        synchronized(mp4Lock) { cleanupMp4FilesLocked() }
+                    } else {
+                        openMp4SaveDialog(output)
+                    }
+                }
+
+                override fun onError(
+                    composition: Composition,
+                    exportResult: ExportResult,
+                    exportException: ExportException
+                ) {
+                    mp4Transformer = null
+                    val reason = exportException.message ?: exportException.errorCodeName
+                    notifyMp4Finished(
+                        false,
+                        "המכשיר לא הצליח לקודד את הסרטון ל-MP4: $reason"
+                    )
+                    synchronized(mp4Lock) { cleanupMp4FilesLocked() }
+                }
+            }
+            mp4Transformer = Transformer.Builder(this)
+                .setVideoMimeType(MimeTypes.VIDEO_H264)
+                .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                .addListener(listener)
+                .build()
+            mp4Transformer?.start(MediaItem.fromUri(Uri.fromFile(input)), output.absolutePath)
+        } catch (e: Exception) {
+            mp4Transformer = null
+            notifyMp4Finished(false, e.message ?: "המרת MP4 נכשלה")
+            synchronized(mp4Lock) { cleanupMp4FilesLocked() }
+        }
+    }
+
+    private fun openMp4SaveDialog(file: File) {
+        mp4SaveFile = file
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "video/mp4"
+            putExtra(Intent.EXTRA_TITLE, mp4DisplayName)
+        }
+        try {
+            startActivityForResult(intent, mp4SaveRequestCode)
+        } catch (_: Exception) {
+            notifyMp4Finished(false, "לא ניתן לפתוח חלון לשמירת MP4")
+            synchronized(mp4Lock) { cleanupMp4FilesLocked() }
+        }
+    }
+
+    private fun notifyMp4Finished(success: Boolean, message: String) {
+        runOnUiThread {
+            if (::webView.isInitialized) {
+                val safeMessage = JSONObject.quote(message)
+                webView.evaluateJavascript(
+                    "window.__cutlabNativeMp4Finished?.($success, $safeMessage);",
+                    null
+                )
+            }
+        }
+    }
+
+    private fun cleanupMp4FilesLocked() {
+        try { mp4InputStream?.close() } catch (_: Exception) { }
+        mp4InputStream = null
+        try { mp4InputFile?.delete() } catch (_: Exception) { }
+        mp4InputFile = null
+        try { mp4OutputFile?.delete() } catch (_: Exception) { }
+        mp4OutputFile = null
+        mp4SaveFile = null
+    }
+
     @Deprecated("Used for compatibility with WebView's file chooser and Storage Access Framework")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -176,6 +344,33 @@ class MainActivity : Activity() {
                 synchronized(saveLock) { saveStream = null }
                 notifySaveReady(false)
             }
+            return
+        }
+        if (requestCode == mp4SaveRequestCode) {
+            val uri = if (resultCode == RESULT_OK) data?.data else null
+            val file = mp4SaveFile
+            if (uri == null || file == null || !file.isFile) {
+                notifyMp4Finished(false, "לא נבחר מיקום לשמירת קובץ ה-MP4")
+                synchronized(mp4Lock) { cleanupMp4FilesLocked() }
+                return
+            }
+            Thread {
+                try {
+                    contentResolver.openOutputStream(uri, "w")?.use { output ->
+                        file.inputStream().use { input -> input.copyTo(output, 256 * 1024) }
+                        output.flush()
+                    } ?: throw IllegalStateException("לא ניתן לפתוח את קובץ היעד")
+                    runOnUiThread {
+                        notifyMp4Finished(true, "הסרטון נשמר בהצלחה כ-MP4")
+                        synchronized(mp4Lock) { cleanupMp4FilesLocked() }
+                    }
+                } catch (e: Exception) {
+                    runOnUiThread {
+                        notifyMp4Finished(false, e.message ?: "שמירת MP4 נכשלה")
+                        synchronized(mp4Lock) { cleanupMp4FilesLocked() }
+                    }
+                }
+            }.start()
             return
         }
         if (requestCode == fileRequestCode) {
@@ -208,6 +403,9 @@ class MainActivity : Activity() {
             try { saveStream?.close() } catch (_: Exception) { }
             saveStream = null
         }
+        try { mp4Transformer?.cancel() } catch (_: Exception) { }
+        mp4Transformer = null
+        synchronized(mp4Lock) { cleanupMp4FilesLocked() }
         if (::webView.isInitialized) {
             webView.stopLoading()
             webView.destroy()
