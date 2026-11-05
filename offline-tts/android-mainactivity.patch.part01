@@ -83,7 +83,7 @@
                      var done = false
                      for (attempt in 1..3) {
                          if (done) break
-@@ -802,12 +857,19 @@
+@@ -802,12 +857,20 @@
  
  // ===== MainActivity =====
  class MainActivity : Activity() {
