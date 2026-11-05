@@ -1,45 +1,83 @@
     private fun loadVoices() {
         val all = tts?.voices ?: emptySet()
-        val installed = all.filter { !it.isNetworkConnectionRequired && !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
-            .sortedWith(compareBy({ it.locale.displayName }, { it.name }))
+        val installed = all.filter {
+            !it.isNetworkConnectionRequired &&
+                !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
+        }.sortedWith(compareBy({ it.locale.displayName }, { it.name }))
+
         val choices = mutableListOf<VoiceChoice>()
-        for (v in installed) {
-            if (v.locale.language == "he") {
-                // אלה פרופילי הגייה המבוססים על אותו מנוע, לא קולות אנושיים נפרדים.
-                choices += VoiceChoice(v, "עברית · טבעי", "natural", 1.0f, 1.0f)
-                choices += VoiceChoice(v, "עברית · רגוע", "calm", 0.90f, 0.92f)
-                choices += VoiceChoice(v, "עברית · ברור", "clear", 0.86f, 1.08f)
-                choices += VoiceChoice(v, "עברית · קריינות", "narration", 0.96f, 0.90f)
-            } else {
-                choices += VoiceChoice(v, "\${v.locale.displayName} · \${v.name}")
+        val hebrewVoice = installed.firstOrNull {
+            it.locale.language.equals("he", true) || it.locale.language.equals("iw", true)
+        }
+
+        if (hebrewVoice != null) {
+            choices += VoiceChoice(hebrewVoice, "עברית · טבעי", "natural", 1.0f, 1.0f)
+            choices += VoiceChoice(hebrewVoice, "עברית · רגוע", "calm", 0.90f, 0.92f)
+            choices += VoiceChoice(hebrewVoice, "עברית · ברור", "clear", 0.86f, 1.08f)
+            choices += VoiceChoice(hebrewVoice, "עברית · קריינות", "narration", 0.96f, 0.90f)
+        } else {
+            // eSpeak NG can support Hebrew via setLanguage(Locale("he")) without
+            // exposing a separate Voice object in TextToSpeech.voices.
+            val he = listOf(Locale.forLanguageTag("he"), Locale("iw"))
+                .firstOrNull { (tts?.isLanguageAvailable(it) ?: TextToSpeech.LANG_NOT_SUPPORTED) >= TextToSpeech.LANG_AVAILABLE }
+            if (he != null) {
+                val canonical = Locale.forLanguageTag("he")
+                choices += VoiceChoice(null, "עברית · eSpeak NG", "natural", 1.0f, 1.0f, canonical)
+                choices += VoiceChoice(null, "עברית · רגוע", "calm", 0.90f, 0.92f, canonical)
+                choices += VoiceChoice(null, "עברית · ברור", "clear", 0.86f, 1.08f, canonical)
+                choices += VoiceChoice(null, "עברית · קריינות", "narration", 0.96f, 0.90f, canonical)
             }
         }
+
+        for (v in installed.filterNot { it.locale.language.equals("he", true) || it.locale.language.equals("iw", true) }) {
+            choices += VoiceChoice(v, "${v.locale.displayName} · ${v.name}")
+        }
+
         voices = choices
         if (voices.isEmpty()) {
-            tvStatus.text = "לא נמצאו קולות מקומיים במכשיר. בדוק את התקנת הקולות במערכת."
+            tvStatus.text = "לא נמצאו קולות מקומיים זמינים במנוע המובנה."
             return
         }
         spVoice.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, voices.map { it.title })
         val savedName = prefs.getString("voice", null)
         val savedStyle = prefs.getString("voiceStyle", "natural")
-        val saved = voices.indexOfFirst { it.voice.name == savedName && it.style == savedStyle }.takeIf { it >= 0 }
-        val hebrew = voices.indexOfFirst { it.voice.locale.language == "he" && it.style == "natural" }.takeIf { it >= 0 }
-        val default = saved ?: hebrew ?: voices.indexOfFirst { it.voice.name == tts?.defaultVoice?.name }.coerceAtLeast(0)
+        val saved = voices.indexOfFirst { it.voice?.name == savedName && it.style == savedStyle }.takeIf { it >= 0 }
+        val hebrew = voices.indexOfFirst {
+            (it.locale?.language == "he" || it.voice?.locale?.language == "he" || it.voice?.locale?.language == "iw") &&
+                it.style == "natural"
+        }.takeIf { it >= 0 }
+        val default = saved ?: hebrew ?: voices.indexOfFirst { it.voice?.name == tts?.defaultVoice?.name }.coerceAtLeast(0)
         spVoice.setSelection(default)
-        if (hebrew == null) tvStatus.text = "לא נמצא קול עברי מקומי. בדוק את התקנת הקולות במערכת."
+        if (hebrew == null) tvStatus.text = "לא נמצא קול עברי זמין במנוע המובנה."
     }
 
     private fun selectedVoice(): VoiceChoice? = voices.getOrNull(spVoice.selectedItemPosition)
 
+    private fun applyVoiceChoice(t: TextToSpeech, choice: VoiceChoice): Boolean {
+        t.stop()
+        val status = if (choice.voice != null) {
+            t.voice = choice.voice
+            TextToSpeech.LANG_AVAILABLE
+        } else {
+            t.setLanguage(choice.locale ?: Locale.forLanguageTag("he"))
+        }
+        if (status < TextToSpeech.LANG_AVAILABLE) {
+            tvStatus.text = "מנוע ההקראה לא אישר קול עברי מקומי."
+            return false
+        }
+        t.setSpeechRate((speed() * choice.rateFactor).coerceIn(0.1f, 2.0f))
+        t.setPitch((pitch() * choice.pitchFactor).coerceIn(0.5f, 2.0f))
+        return true
+    }
+
     private fun preview() {
         val t = tts ?: return
         val choice = selectedVoice() ?: return
-        t.stop()
-        t.voice = choice.voice
-        t.setSpeechRate((speed() * choice.rateFactor).coerceIn(0.1f, 2.0f))
-        t.setPitch((pitch() * choice.pitchFactor).coerceIn(0.5f, 2.0f))
-        val sample = if (choice.voice.locale.language == "he")
-            HebrewSpeech.prepare("שלום וברוכים הבאים למקריא ל‑MP3. כאן אפשר להאזין לדוגמת קול ולבחור סגנון דיבור.")
+        if (!applyVoiceChoice(t, choice)) return
+        val isHebrew = choice.locale?.language == "he" ||
+            choice.voice?.locale?.language == "he" || choice.voice?.locale?.language == "iw"
+        val sample = if (isHebrew)
+            HebrewSpeech.prepare("שלום וברוכים הבאים למקריא ל-MP3. כאן אפשר להאזין לדוגמת קול ולבחור סגנון דיבור.")
         else "Hello, welcome to the MP3 reader. This is a sample of the selected voice."
         t.speak(sample, TextToSpeech.QUEUE_FLUSH, null, "preview")
     }
@@ -47,7 +85,7 @@
     private fun savePrefs() {
         val choice = selectedVoice()
         prefs.edit()
-            .putString("voice", choice?.voice?.name)
+            .putString("voice", choice?.voice?.name ?: if (choice?.locale != null) "LANG:${choice.locale.toLanguageTag()}" else null)
             .putString("voiceStyle", choice?.style ?: "natural")
             .putInt("bitrate", spBitrate.selectedItemPosition)
             .putInt("split", spSplit.selectedItemPosition)
