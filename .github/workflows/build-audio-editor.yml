@@ -74,7 +74,7 @@ jobs:
           test -s "$PROJECT/app/src/main/java/com/example/audioeditor/MainActivity.kt"
           echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
 
-      - name: Prepare legacy LAME library and Android manifest
+      - name: Prepare LAME, Android manifest and Compose pointer handling
         shell: bash
         run: |
           set -euo pipefail
@@ -112,10 +112,21 @@ jobs:
           elif new not in g:
               raise SystemExit("Could not exclude legacy support libraries from TAndroidLame")
           gradle.write_text(g)
+
+          waveform = root / "app/src/main/java/com/example/audioeditor/WaveformView.kt"
+          w = waveform.read_text()
+          old_drag = "ch.positionChange().x"
+          new_drag = "(ch.position - ch.previousPosition).x"
+          if old_drag in w:
+              w = w.replace(old_drag, new_drag, 1)
+          elif new_drag not in w:
+              raise SystemExit("Could not update Compose pointer delta calculation")
+          waveform.write_text(w)
           PY
           grep -q 'tools:replace="android:allowBackup"' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
           grep -q 'android:appCategory="audio"' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
           grep -q 'exclude(group = "com.android.support")' "$PROJECT_DIR/app/build.gradle.kts"
+          grep -q '(ch.position - ch.previousPosition).x' "$PROJECT_DIR/app/src/main/java/com/example/audioeditor/WaveformView.kt"
 
       - name: Build installable debug APK
         shell: bash
