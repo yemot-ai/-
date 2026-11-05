@@ -201,7 +201,7 @@ jobs:
               marker = "    defaultConfig {"
               if marker not in s:
                   raise SystemExit("Application defaultConfig block was not found")
-              s = s.replace(marker, marker + "\\n        applicationId 'com.yemotai.mp3reader.repaired'", 1)
+              s = s.replace(marker, marker + "\n        applicationId 'com.yemotai.mp3reader.repaired'", 1)
           gradle.write_text(s)
 
           manifest = base / "AndroidManifest.xml"
