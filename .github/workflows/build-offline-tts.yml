@@ -93,10 +93,32 @@ jobs:
           start = code.index("    private fun loadVoices() {")
           end = code.index("    private fun onConvert() {", start)
           code = code[:start] + target.read_text() + chr(10) + code[end:]
+
+          # Replace the VoiceChoice declaration explicitly rather than relying on
+          # a context-sensitive patch hunk. Hebrew may be represented as a locale
+          # supported by eSpeak even when the engine does not publish a Voice item.
+          voice_class = """    private data class VoiceChoice(
+              val voice: Voice?,
+              val title: String,
+              val style: String = "natural",
+              val rateFactor: Float = 1f,
+              val pitchFactor: Float = 1f,
+              val locale: Locale? = null
+          )
+          """
+          voice_start = code.find("    private data class VoiceChoice(")
+          if voice_start >= 0:
+              voice_end = code.index("    private val REQ_PICK", voice_start)
+              code = code[:voice_start] + voice_class + code[voice_end:]
+          else:
+              insert_at = code.index("    private val REQ_PICK")
+              code = code[:insert_at] + voice_class + code[insert_at:]
           main.write_text(code)
           PY
           grep -q 'object HebrewSpeech' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
           grep -q 'private data class VoiceChoice' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
+          grep -q 'val voice: Voice?' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
+          grep -q 'val locale: Locale? = null' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
           grep -q 'private fun selectedVoice(): VoiceChoice?' "$RUNNER_TEMP/offline-tts-original/app/src/main/java/com/example/offlinetts/MainActivity.kt"
 
       - name: Fetch eSpeak NG embedded engine source
@@ -139,7 +161,7 @@ jobs:
 
           old_voice_select = 't.voices?.firstOrNull { it.name == p.voice }?.let { t.voice = it }'
           new_voice_select = """if (p.voice?.startsWith("LANG:") == true) {
-                      val locale = Locale.forLanguageTag(p.voice.removePrefix("LANG:"))
+                      val locale = Locale.forLanguageTag(p.voice.orEmpty().removePrefix("LANG:"))
                       val languageStatus = t.setLanguage(locale)
                       if (languageStatus < TextToSpeech.LANG_AVAILABLE) {
                           throw IllegalStateException("מנוע ההקראה אינו תומך בעברית במכשיר הזה")
