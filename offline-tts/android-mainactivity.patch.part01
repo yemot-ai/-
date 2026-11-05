@@ -88,11 +88,12 @@
  // ===== MainActivity =====
  class MainActivity : Activity() {
 +    private data class VoiceChoice(
-+        val voice: Voice,
++        val voice: Voice?,
 +        val title: String,
 +        val style: String = "natural",
 +        val rateFactor: Float = 1f,
-+        val pitchFactor: Float = 1f
++        val pitchFactor: Float = 1f,
++        val locale: Locale? = null
 +    )
      private val REQ_PICK = 1
      private val REQ_FOLDER = 2
