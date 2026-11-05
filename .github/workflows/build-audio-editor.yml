@@ -74,7 +74,7 @@ jobs:
           test -s "$PROJECT/app/src/main/java/com/example/audioeditor/MainActivity.kt"
           echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
 
-      - name: Prepare legacy LAME library for AndroidX
+      - name: Prepare legacy LAME library and Android manifest
         shell: bash
         run: |
           set -euo pipefail
@@ -94,8 +94,11 @@ jobs:
                   'android:allowBackup="false"\n        tools:replace="android:allowBackup"',
                   1
               )
+          s = s.replace('android:appCategory="music"', 'android:appCategory="audio"', 1)
           if tools_ns not in s or 'tools:replace="android:allowBackup"' not in s:
               raise SystemExit("Could not apply manifest merger override")
+          if 'android:appCategory="audio"' not in s:
+              raise SystemExit("Could not set a valid Android appCategory")
           manifest.write_text(s)
 
           gradle = root / "app/build.gradle.kts"
@@ -111,6 +114,7 @@ jobs:
           gradle.write_text(g)
           PY
           grep -q 'tools:replace="android:allowBackup"' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          grep -q 'android:appCategory="audio"' "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
           grep -q 'exclude(group = "com.android.support")' "$PROJECT_DIR/app/build.gradle.kts"
 
       - name: Build installable debug APK
