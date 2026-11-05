@@ -197,6 +197,11 @@ jobs:
           s = s.replace("java.srcDirs = ['src']", "java.srcDirs = ['src']\n            kotlin.srcDirs = ['src']")
           if "compileOptions {" not in s:
               s = s.replace("android {", "android {\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }", 1)
+          if "applicationId" not in s:
+              marker = "    defaultConfig {"
+              if marker not in s:
+                  raise SystemExit("Application defaultConfig block was not found")
+              s = s.replace(marker, marker + "\\n        applicationId 'com.yemotai.mp3reader.repaired'", 1)
           gradle.write_text(s)
 
           manifest = base / "AndroidManifest.xml"
@@ -268,6 +273,7 @@ jobs:
           grep -q 'TextRecognition.getClient' "$RUNNER_TEMP/espeak-ng/android/src/com/example/offlinetts/MainActivity.kt"
           grep -q 'p.voice?.startsWith("LANG:")' "$RUNNER_TEMP/espeak-ng/android/src/com/example/offlinetts/MainActivity.kt"
           grep -q 'setLanguage(locale)' "$RUNNER_TEMP/espeak-ng/android/src/com/example/offlinetts/MainActivity.kt"
+          grep -q "applicationId 'com.yemotai.mp3reader.repaired'" "$RUNNER_TEMP/espeak-ng/android/build.gradle"
 
       - name: Build APK with bundled voices and original features
         run: |
