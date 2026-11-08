@@ -291,7 +291,6 @@ class MainActivity : Activity() {
         webView.loadUrl("file:///android_asset/index.html")
     }
 
-    private fun openSaveDialog(
     private class StreamingLinearResampler(
         private val inputRate: Int,
         private val emit: (FloatArray) -> Unit
