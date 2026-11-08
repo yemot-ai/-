@@ -150,12 +150,7 @@ class MainActivity : Activity() {
         @JavascriptInterface
         fun cancelMp4Export() {
             runOnUiThread {
-                try { mp4Transformer?.cancel() } catch (_: Exception) { }        transcriptionCancelled = true
-        synchronized(transcriptionLock) {
-            try { transcriptionOutput?.close() } catch (_: Exception) { }
-            transcriptionOutput = null
-        }
-        try { mp4Transformer?.cancel() } catch (_: Exception) { }
+                try { mp4Transformer?.cancel() } catch (_: Exception) { }
                 mp4Transformer = null
                 synchronized(mp4Lock) { cleanupMp4FilesLocked() }
                 notifyMp4Finished(false, "הייצוא בוטל")
@@ -798,9 +793,14 @@ class MainActivity : Activity() {
             try { saveStream?.close() } catch (_: Exception) { }
             saveStream = null
         }
+        transcriptionCancelled = true
+        synchronized(transcriptionLock) {
+            try { transcriptionOutput?.close() } catch (_: Exception) { }
+            transcriptionOutput = null
+        }
+        try { transcriptionThread?.interrupt() } catch (_: Exception) { }
         try { mp4Transformer?.cancel() } catch (_: Exception) { }
         mp4Transformer = null
-        synchronized(mp4Lock) { cleanupMp4FilesLocked() }        mp4Transformer = null
         try { hebrewRecognizer?.release() } catch (_: Exception) { }
         hebrewRecognizer = null
         synchronized(mp4Lock) { cleanupMp4FilesLocked() }
