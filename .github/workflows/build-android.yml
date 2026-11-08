@@ -2,7 +2,7 @@ name: Build Social Android APK
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "social-pro-offline-captions"]
     paths:
       - 'index.html'
       - 'app.css'
@@ -40,6 +40,25 @@ jobs:
           test -s app/src/main/res/drawable/ic_social.xml
           grep -q 'android:label="סושיאל"' app/src/main/AndroidManifest.xml
           grep -q 'applicationId = "com.yemotai.videostudio.repaired"' app/build.gradle.kts
+      - name: Download Hebrew offline speech model
+        run: |
+          set -euo pipefail
+          MODEL_DIR="app/src/main/assets/hebrew_asr"
+          mkdir -p "$MODEL_DIR"
+          BASE="https://huggingface.co/ivrit-ai/zipformer2-66m-streaming-he/resolve/ee769a2a13b887f91572eec349458bfb0fe79e7a/sherpa-onnx"
+          for FILE in encoder.int8.onnx decoder.int8.onnx joiner.int8.onnx tokens.txt; do
+            curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 "$BASE/$FILE?download=true" -o "$MODEL_DIR/$FILE"
+            test -s "$MODEL_DIR/$FILE"
+          done
+          cat > "$MODEL_DIR/ATTRIBUTION.txt" <<'EOF'
+          Hebrew streaming Zipformer2 model
+          Developer: Yakov Kolani
+          Mirror/export: ivrit-ai/zipformer2-66m-streaming-he
+          Pinned revision: ee769a2a13b887f91572eec349458bfb0fe79e7a
+          License: CC-BY-4.0
+          https://creativecommons.org/licenses/by/4.0/
+          EOF
+          du -sh "$MODEL_DIR"
       - name: Package standalone editor into Android assets
         run: |
           mkdir -p app/src/main/assets
@@ -82,6 +101,14 @@ jobs:
           test -s "$APK"
           unzip -t "$APK" | tail -n 1
           unzip -l "$APK" | grep -q 'assets/index.html'
+          unzip -l "$APK" | grep -q 'assets/hebrew_asr/encoder.int8.onnx'
+          unzip -l "$APK" | grep -q 'assets/hebrew_asr/tokens.txt'
+          SIZE_BYTES="$(stat -c '%s' "$APK")"
+          MAX_BYTES=$((150 * 1024 * 1024))
+          if [ "$SIZE_BYTES" -gt "$MAX_BYTES" ]; then
+            echo "APK exceeds 150 MB: $SIZE_BYTES bytes"
+            exit 1
+          fi
           SIGNER="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -type f -name apksigner 2>/dev/null | sort | tail -n 1)"
           if [ -n "$SIGNER" ]; then "$SIGNER" verify --verbose "$APK"; fi
           ls -lh "$APK"

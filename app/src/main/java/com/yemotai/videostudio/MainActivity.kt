@@ -3,6 +3,10 @@ package com.yemotai.videostudio
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.media.AudioFormat
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
@@ -21,10 +25,19 @@ import androidx.media3.transformer.Composition
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
+import com.k2fsa.sherpa.onnx.EndpointConfig
+import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OnlineModelConfig
+import com.k2fsa.sherpa.onnx.OnlineRecognizer
+import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import java.nio.ByteOrder
+import kotlin.math.max
 
 class MainActivity : Activity() {
     private lateinit var webView: WebView
@@ -42,6 +55,13 @@ class MainActivity : Activity() {
     private var mp4DisplayName: String = "סרטון.mp4"
     private var mp4SaveFile: File? = null
     private var mp4Transformer: Transformer? = null
+
+    private val transcriptionLock = Any()
+    private var transcriptionOutput: FileOutputStream? = null
+    private var transcriptionInputFile: File? = null
+    @Volatile private var transcriptionCancelled = false
+    @Volatile private var transcriptionThread: Thread? = null
+    @Volatile private var hebrewRecognizer: OnlineRecognizer? = null
 
     private inner class CutlabBridge {
         @JavascriptInterface
@@ -136,6 +156,67 @@ class MainActivity : Activity() {
                 notifyMp4Finished(false, "הייצוא בוטל")
             }
         }
+
+        @JavascriptInterface
+        fun beginTranscription(name: String, mimeType: String): Boolean = synchronized(transcriptionLock) {
+            try {
+                if (transcriptionThread?.isAlive == true) return@synchronized false
+                try { transcriptionOutput?.close() } catch (_: Exception) { }
+                transcriptionOutput = null
+                try { transcriptionInputFile?.delete() } catch (_: Exception) { }
+                val file = File(cacheDir, "social-caption-" + System.currentTimeMillis() + ".media")
+                transcriptionInputFile = file
+                transcriptionOutput = FileOutputStream(file)
+                transcriptionCancelled = false
+                true
+            } catch (_: Exception) {
+                transcriptionOutput = null
+                transcriptionInputFile = null
+                false
+            }
+        }
+
+        @JavascriptInterface
+        fun writeTranscriptionChunk(encodedChunk: String): Boolean = synchronized(transcriptionLock) {
+            val output = transcriptionOutput ?: return@synchronized false
+            try {
+                output.write(Base64.decode(encodedChunk, Base64.DEFAULT))
+                true
+            } catch (_: Exception) {
+                false
+            }
+        }
+
+        @JavascriptInterface
+        fun finishTranscription(): Boolean {
+            val file = synchronized(transcriptionLock) {
+                try {
+                    transcriptionOutput?.flush()
+                    transcriptionOutput?.close()
+                } catch (_: Exception) {
+                    return false
+                }
+                transcriptionOutput = null
+                val input = transcriptionInputFile
+                if (input == null || !input.isFile || input.length() < 256L) return false
+                input
+            }
+            transcriptionCancelled = false
+            transcriptionThread = Thread {
+                transcribeVideoAudio(file)
+            }.also { it.start() }
+            return true
+        }
+
+        @JavascriptInterface
+        fun cancelTranscription() {
+            transcriptionCancelled = true
+            synchronized(transcriptionLock) {
+                try { transcriptionOutput?.close() } catch (_: Exception) { }
+                transcriptionOutput = null
+            }
+            try { transcriptionThread?.interrupt() } catch (_: Exception) { }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -208,6 +289,314 @@ class MainActivity : Activity() {
             ))
         })
         webView.loadUrl("file:///android_asset/index.html")
+    }
+
+    private class StreamingLinearResampler(
+        private val inputRate: Int,
+        private val emit: (FloatArray) -> Unit
+    ) {
+        private val ratio = inputRate.toDouble() / 16000.0
+        private var inputIndex = 0L
+        private var nextOutputPosition = 0.0
+        private var previous: Float? = null
+        private val pending = FloatArray(3200)
+        private var pendingCount = 0
+
+        fun accept(samples: FloatArray) {
+            for (sample in samples) {
+                val prev = previous
+                if (prev == null) {
+                    push(sample)
+                    nextOutputPosition = ratio
+                } else {
+                    val currentIndex = inputIndex.toDouble()
+                    while (nextOutputPosition <= currentIndex) {
+                        val fraction = (nextOutputPosition - (currentIndex - 1.0)).coerceIn(0.0, 1.0)
+                        push((prev + (sample - prev) * fraction).toFloat())
+                        nextOutputPosition += ratio
+                    }
+                }
+                previous = sample
+                inputIndex += 1L
+            }
+        }
+
+        private fun push(value: Float) {
+            pending[pendingCount++] = value
+            if (pendingCount == pending.size) {
+                emit(pending.copyOf(pendingCount))
+                pendingCount = 0
+            }
+        }
+
+        fun finish() {
+            if (pendingCount > 0) {
+                emit(pending.copyOf(pendingCount))
+                pendingCount = 0
+            }
+        }
+    }
+
+    private fun copyHebrewModelAsset(fileName: String): File {
+        val target = File(filesDir, "hebrew_asr/" + fileName)
+        if (!target.isFile || target.length() == 0L) {
+            target.parentFile?.mkdirs()
+            assets.open("hebrew_asr/" + fileName).use { input ->
+                FileOutputStream(target).use { output -> input.copyTo(output, 256 * 1024) }
+            }
+        }
+        return target
+    }
+
+    @Synchronized
+    private fun getHebrewRecognizer(): OnlineRecognizer {
+        hebrewRecognizer?.let { return it }
+        val encoder = copyHebrewModelAsset("encoder.int8.onnx")
+        val decoder = copyHebrewModelAsset("decoder.int8.onnx")
+        val joiner = copyHebrewModelAsset("joiner.int8.onnx")
+        val tokens = copyHebrewModelAsset("tokens.txt")
+        val model = OnlineModelConfig(
+            transducer = OnlineTransducerModelConfig(
+                encoder = encoder.absolutePath,
+                decoder = decoder.absolutePath,
+                joiner = joiner.absolutePath
+            ),
+            tokens = tokens.absolutePath,
+            numThreads = max(1, Runtime.getRuntime().availableProcessors() / 2).coerceAtMost(4),
+            provider = "cpu",
+            modelType = "zipformer2"
+        )
+        val config = OnlineRecognizerConfig(
+            featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
+            modelConfig = model,
+            endpointConfig = EndpointConfig(),
+            enableEndpoint = true,
+            decodingMethod = "greedy_search",
+            maxActivePaths = 4
+        )
+        return OnlineRecognizer(assetManager = null, config = config).also { hebrewRecognizer = it }
+    }
+
+    private fun notifyTranscriptionProgress(percent: Int, message: String) {
+        runOnUiThread {
+            if (::webView.isInitialized) {
+                val code = "window.__socialTranscriptionProgress?.(" +
+                    percent.coerceIn(0, 100) + "," + JSONObject.quote(message) + ");"
+                webView.evaluateJavascript(code, null)
+            }
+        }
+    }
+
+    private fun notifyTranscriptionFinished(segments: JSONArray?, error: String?) {
+        runOnUiThread {
+            if (::webView.isInitialized) {
+                val payload = JSONObject.quote(segments?.toString() ?: "[]")
+                val errorValue = if (error == null) "null" else JSONObject.quote(error)
+                val code = "window.__socialTranscriptionFinished?.(" + payload + "," + errorValue + ");"
+                webView.evaluateJavascript(code, null)
+            }
+        }
+    }
+
+    private fun transcribeVideoAudio(input: File) {
+        var extractor: MediaExtractor? = null
+        var decoder: MediaCodec? = null
+        var stream: com.k2fsa.sherpa.onnx.OnlineStream? = null
+        try {
+            if (!input.isFile || input.length() < 256L) {
+                throw IllegalStateException("קובץ הווידאו ריק או לא תקין")
+            }
+            notifyTranscriptionProgress(2, "טוען את מנוע התמלול העברי…")
+            val recognizer = getHebrewRecognizer()
+            stream = recognizer.createStream()
+            val captions = JSONArray()
+            var processedSamples = 0L
+            var segmentStart = 0.0
+
+            fun consumeResampled(block: FloatArray) {
+                if (block.isEmpty() || transcriptionCancelled) return
+                stream!!.acceptWaveform(block, 16000)
+                processedSamples += block.size
+                while (recognizer.isReady(stream!!)) {
+                    recognizer.decode(stream!!)
+                }
+                if (recognizer.isEndpoint(stream!!)) {
+                    val text = recognizer.getResult(stream!!).text.trim()
+                    val end = processedSamples.toDouble() / 16000.0
+                    if (text.isNotBlank()) {
+                        captions.put(
+                            JSONObject()
+                                .put("start", segmentStart)
+                                .put("end", max(segmentStart + 0.25, end))
+                                .put("text", text)
+                        )
+                    }
+                    recognizer.reset(stream!!)
+                    segmentStart = end
+                }
+            }
+
+            extractor = MediaExtractor()
+            extractor.setDataSource(input.absolutePath)
+            var audioTrack = -1
+            var inputFormat: MediaFormat? = null
+            for (index in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(index)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (mime.startsWith("audio/")) {
+                    audioTrack = index
+                    inputFormat = format
+                    break
+                }
+            }
+            if (audioTrack < 0 || inputFormat == null) {
+                throw IllegalStateException("לא נמצא פס קול בסרטון")
+            }
+
+            extractor.selectTrack(audioTrack)
+            val mime = inputFormat.getString(MediaFormat.KEY_MIME)
+                ?: throw IllegalStateException("פורמט האודיו אינו נתמך")
+            val durationUs = if (inputFormat.containsKey(MediaFormat.KEY_DURATION)) {
+                inputFormat.getLong(MediaFormat.KEY_DURATION).coerceAtLeast(1L)
+            } else 0L
+
+            decoder = MediaCodec.createDecoderByType(mime)
+            decoder.configure(inputFormat, null, null, 0)
+            decoder.start()
+
+            var inputDone = false
+            var outputDone = false
+            var outputRate = inputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+            var outputChannels = inputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+            var outputEncoding = AudioFormat.ENCODING_PCM_16BIT
+            var activeResampleRate = 0
+            var resampler: StreamingLinearResampler? = null
+            var lastProgress = -1
+
+            notifyTranscriptionProgress(5, "מפענח את פס הקול…")
+            val info = MediaCodec.BufferInfo()
+            while (!outputDone && !transcriptionCancelled) {
+                if (!inputDone) {
+                    val inputIndex = decoder.dequeueInputBuffer(10000)
+                    if (inputIndex >= 0) {
+                        val buffer = decoder.getInputBuffer(inputIndex)
+                            ?: throw IllegalStateException("לא ניתן לקרוא את נתוני האודיו")
+                        buffer.clear()
+                        val size = extractor.readSampleData(buffer, 0)
+                        if (size < 0) {
+                            decoder.queueInputBuffer(
+                                inputIndex, 0, 0, 0L, MediaCodec.BUFFER_FLAG_END_OF_STREAM
+                            )
+                            inputDone = true
+                        } else {
+                            val time = extractor.sampleTime.coerceAtLeast(0L)
+                            decoder.queueInputBuffer(inputIndex, 0, size, time, 0)
+                            extractor.advance()
+                        }
+                    }
+                }
+
+                val outputIndex = decoder.dequeueOutputBuffer(info, 10000)
+                when {
+                    outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val fmt = decoder.outputFormat
+                        if (fmt.containsKey(MediaFormat.KEY_SAMPLE_RATE)) {
+                            outputRate = fmt.getInteger(MediaFormat.KEY_SAMPLE_RATE)
+                        }
+                        if (fmt.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) {
+                            outputChannels = fmt.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
+                        }
+                        if (fmt.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                            outputEncoding = fmt.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                        }
+                    }
+                    outputIndex >= 0 -> {
+                        if (info.size > 0) {
+                            val bytes = decoder.getOutputBuffer(outputIndex)
+                            if (bytes != null) {
+                                val pcm = bytes.duplicate().order(ByteOrder.LITTLE_ENDIAN)
+                                pcm.position(info.offset)
+                                pcm.limit(info.offset + info.size)
+                                val bytesPerSample = if (outputEncoding == AudioFormat.ENCODING_PCM_FLOAT) 4 else 2
+                                val channels = outputChannels.coerceAtLeast(1)
+                                val frameCount = pcm.remaining() / (bytesPerSample * channels)
+                                val mono = FloatArray(frameCount)
+                                for (frame in 0 until frameCount) {
+                                    var total = 0f
+                                    for (channel in 0 until channels) {
+                                        val value = if (outputEncoding == AudioFormat.ENCODING_PCM_FLOAT) {
+                                            pcm.float
+                                        } else {
+                                            pcm.short.toFloat() / 32768.0f
+                                        }
+                                        total += value
+                                    }
+                                    mono[frame] = total / channels.toFloat()
+                                }
+                                if (activeResampleRate != outputRate || resampler == null) {
+                                    resampler?.finish()
+                                    activeResampleRate = outputRate
+                                    resampler = StreamingLinearResampler(outputRate, ::consumeResampled)
+                                }
+                                resampler?.accept(mono)
+                            }
+                        }
+                        decoder.releaseOutputBuffer(outputIndex, false)
+                        if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
+                            outputDone = true
+                        }
+                        if (durationUs > 0L) {
+                            val currentUs = extractor.sampleTime.coerceAtLeast(0L)
+                            val progress = (5 + (currentUs.toDouble() / durationUs.toDouble() * 75.0)).toInt()
+                                .coerceIn(5, 80)
+                            if (progress > lastProgress) {
+                                lastProgress = progress
+                                notifyTranscriptionProgress(progress, "מתמלל בעברית… " + progress + "%")
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (transcriptionCancelled) {
+                throw InterruptedException("התמלול בוטל")
+            }
+            resampler?.finish()
+            val audioDuration = processedSamples.toDouble() / 16000.0
+
+            // Flush the streaming recognizer so it can return the final words.
+            stream!!.acceptWaveform(FloatArray(24000), 16000)
+            while (recognizer.isReady(stream!!)) recognizer.decode(stream!!)
+            stream!!.inputFinished()
+            while (recognizer.isReady(stream!!)) recognizer.decode(stream!!)
+            val finalText = recognizer.getResult(stream!!).text.trim()
+            if (finalText.isNotBlank()) {
+                captions.put(
+                    JSONObject()
+                        .put("start", segmentStart)
+                        .put("end", max(segmentStart + 0.25, audioDuration))
+                        .put("text", finalText)
+                )
+            }
+
+            if (transcriptionCancelled) throw InterruptedException("התמלול בוטל")
+            notifyTranscriptionProgress(100, "התמלול הושלם")
+            notifyTranscriptionFinished(captions, null)
+        } catch (cancelled: InterruptedException) {
+            notifyTranscriptionFinished(null, "התמלול בוטל")
+        } catch (e: Exception) {
+            notifyTranscriptionFinished(null, e.message ?: "התמלול נכשל")
+        } finally {
+            try { stream?.release() } catch (_: Exception) { }
+            try { decoder?.stop() } catch (_: Exception) { }
+            try { decoder?.release() } catch (_: Exception) { }
+            try { extractor?.release() } catch (_: Exception) { }
+            try { input.delete() } catch (_: Exception) { }
+            synchronized(transcriptionLock) {
+                if (transcriptionInputFile == input) transcriptionInputFile = null
+            }
+            transcriptionThread = null
+        }
     }
 
     private fun openSaveDialog(name: String, mimeType: String) {
@@ -403,8 +792,16 @@ class MainActivity : Activity() {
             try { saveStream?.close() } catch (_: Exception) { }
             saveStream = null
         }
+        transcriptionCancelled = true
+        synchronized(transcriptionLock) {
+            try { transcriptionOutput?.close() } catch (_: Exception) { }
+            transcriptionOutput = null
+        }
+        try { transcriptionThread?.interrupt() } catch (_: Exception) { }
         try { mp4Transformer?.cancel() } catch (_: Exception) { }
         mp4Transformer = null
+        try { hebrewRecognizer?.release() } catch (_: Exception) { }
+        hebrewRecognizer = null
         synchronized(mp4Lock) { cleanupMp4FilesLocked() }
         if (::webView.isInitialized) {
             webView.stopLoading()

@@ -11,9 +11,10 @@ android {
     defaultConfig {
         applicationId = "com.yemotai.videostudio.repaired"
         minSdk = 26
+        ndk { abiFilters += setOf("arm64-v8a") }
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "2.0.0"
     }
 
     buildTypes {
@@ -43,6 +44,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
     implementation("androidx.media3:media3-transformer:1.5.1")
+    implementation("com.xdcobra.sherpa:sherpa-onnx:1.13.2-1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
 
