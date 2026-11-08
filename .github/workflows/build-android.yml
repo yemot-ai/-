@@ -46,7 +46,7 @@ jobs:
           MODEL_DIR="app/src/main/assets/hebrew_asr"
           mkdir -p "$MODEL_DIR"
           BASE="https://huggingface.co/ivrit-ai/zipformer2-66m-streaming-he/resolve/ee769a2a13b887f91572eec349458bfb0fe79e7a/sherpa-onnx"
-          for FILE in encoder.int8.onnx decoder.int8.onnx joiner.int8.onnx tokens.txt bpe.vocab; do
+          for FILE in encoder.int8.onnx decoder.int8.onnx joiner.int8.onnx tokens.txt; do
             curl --fail --location --retry 4 --retry-all-errors --connect-timeout 30 "$BASE/$FILE?download=true" -o "$MODEL_DIR/$FILE"
             test -s "$MODEL_DIR/$FILE"
           done
