@@ -36,13 +36,21 @@ jobs:
           test -f ProCameraStudio/app/build.gradle.kts
           test -f ProCameraStudio/app/src/main/java/com/procamera/studio/MainActivity.kt
           grep -q 'minSdk = 30' ProCameraStudio/app/build.gradle.kts
+          python3 - <<'PY'
+          from pathlib import Path
+          root = Path("ProCameraStudio")
+          project = root / "build.gradle.kts"
+          project.write_text(project.read_text().replace('version "8.7.3"', 'version "8.9.1"'))
+          app = root / "app/build.gradle.kts"
+          app.write_text(app.read_text().replace("compileSdk = 35", "compileSdk = 36"))
+          PY
 
       - name: Prepare Android SDK
         shell: bash
         run: |
           echo "sdk.dir=$ANDROID_HOME" > "$GITHUB_WORKSPACE/ProCameraStudio/local.properties"
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list_installed
 
       - name: Set up JDK 17
@@ -54,7 +62,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.11.1'
 
       - name: Build debug APK
         run: |
@@ -67,7 +75,7 @@ jobs:
           APK="ProCameraStudio/app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
           ls -lh "$APK"
-          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
           grep -q "sdkVersion:'30'" apk-badging.txt
           grep -q "targetSdkVersion:'35'" apk-badging.txt
 
