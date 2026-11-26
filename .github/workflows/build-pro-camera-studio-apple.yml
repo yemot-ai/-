@@ -44,6 +44,26 @@ jobs:
           app = root / "app/build.gradle.kts"
           app.write_text(app.read_text().replace("compileSdk = 35", "compileSdk = 36"))
           PY
+          # Apply the two Kotlin compile fixes found in the previous build.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          base = Path("ProCameraStudio/app/src/main/java/com/procamera/studio/ui")
+          editor = base / "EditorScreen.kt"
+          src = editor.read_text()
+          src, changed = re.subn(r"\\.getArray\\([^)]*\\)", ".getArray()", src)
+          if changed == 0:
+              raise SystemExit("Expected getArray(...) call was not found in EditorScreen.kt")
+          editor.write_text(src)
+          video = base / "VideoPlayerScreen.kt"
+          src = video.read_text()
+          if "import androidx.compose.ui.unit.dp" not in src:
+              src = re.sub(r"^(package [^\\n]+\\n)", r"\\1\\nimport androidx.compose.ui.unit.dp\\n", src, count=1, flags=re.M)
+          if "import androidx.compose.ui.unit.dp" not in src:
+              raise SystemExit("Could not add dp import to VideoPlayerScreen.kt")
+          video.write_text(src)
+          print(f"Fixed EditorScreen.kt getArray() call ({changed} replacement(s)) and VideoPlayerScreen.kt dp import")
+          PY
 
       - name: Prepare Android SDK
         shell: bash
