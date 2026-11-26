@@ -19,7 +19,8 @@ jobs:
       - name: Reconstruct Android project
         shell: bash
         run: |
-          cat ProCameraStudio_Source.part0 ProCameraStudio_Source.part1 ProCameraStudio_Source.part2 ProCameraStudio_Source.part3 > source.zip.b64
+          cat ProCameraStudio_Source.part0 ProCameraStudio_Source.part1 ProCameraStudio_Source.part2 ProCameraStudio_Source.part3 ProCameraStudio_Source.part4 > source.zip.b64
+          test "$(wc -c < source.zip.b64)" -eq 32180
           base64 --decode source.zip.b64 > source.zip
           unzip -tq source.zip
           unzip -q source.zip
