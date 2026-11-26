@@ -43,6 +43,12 @@ jobs:
           test -f ProCameraStudio/app/build.gradle.kts
           test -f ProCameraStudio/settings.gradle.kts
 
+      - name: Apply Android 9 compatibility adjustments
+        run: |
+          python3 apply_android9_compat.py ProCameraStudio
+          grep -q 'minSdk = 28' ProCameraStudio/app/build.gradle.kts
+          test -f ProCameraStudio/app/src/main/java/com/procamera/studio/ui/MediaStoreCompat.kt
+
       - name: Prepare preinstalled Android SDK
         shell: bash
         run: |
@@ -75,7 +81,7 @@ jobs:
       - name: Upload installable APK
         uses: actions/upload-artifact@v4
         with:
-          name: pro-camera-studio-apk
+          name: pro-camera-studio-apk-android9
           path: ProCameraStudio/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
