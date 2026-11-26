@@ -101,7 +101,7 @@ replace_once(
     '''        val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, buildMediaName("jpg", nameSuffix))
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, "\${Environment.DIRECTORY_PICTURES}/PRO CAMERA STUDIO")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/PRO CAMERA STUDIO")
         }
 ''',
     '''        val values = createMediaContentValues(
@@ -133,7 +133,7 @@ replace_once(
     '''            val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, buildMediaName("mp4", suffix))
                 put(MediaStore.MediaColumns.MIME_TYPE, "video/mp4")
-                put(MediaStore.MediaColumns.RELATIVE_PATH, "\${Environment.DIRECTORY_MOVIES}/PRO CAMERA STUDIO")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/PRO CAMERA STUDIO")
             }
 ''',
     '''            val values = createMediaContentValues(
@@ -223,7 +223,7 @@ replace_once(
     '''        val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, "PSC_EDIT_$stamp.jpg")
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            put(MediaStore.MediaColumns.RELATIVE_PATH, "\${Environment.DIRECTORY_PICTURES}/PRO CAMERA STUDIO")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/PRO CAMERA STUDIO")
         }
 ''',
     '''        val contentValues = createMediaContentValues(
