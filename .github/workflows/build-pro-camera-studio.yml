@@ -16,10 +16,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Reconstruct Android project
+      - name: Reconstruct verified Android project
         shell: bash
         run: |
-          cat ProCameraStudio_Source.part0 ProCameraStudio_Source.part1 ProCameraStudio_Source.part2 ProCameraStudio_Source.part3 ProCameraStudio_Source.part4 > source.zip.b64
+          cat ProCameraStudio_Source.part0 \
+              ProCameraStudio_Source.part1 \
+              ProCameraStudio_Source.part2 \
+              ProCameraStudio_Source.part3a \
+              ProCameraStudio_Source.part3b0 \
+              ProCameraStudio_Source.part3b1 \
+              ProCameraStudio_Source.tail0 \
+              ProCameraStudio_Source.fix0 \
+              ProCameraStudio_Source.fix1 \
+              ProCameraStudio_Source.fix2 \
+              ProCameraStudio_Source.fix3 \
+              ProCameraStudio_Source.tail3 \
+              ProCameraStudio_Source.tail4 \
+              ProCameraStudio_Source.tail5 > source.zip.b64
           test "$(wc -c < source.zip.b64)" -eq 32180
           base64 --decode source.zip.b64 > source.zip
           unzip -tq source.zip
