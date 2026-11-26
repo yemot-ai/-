@@ -1,0 +1,80 @@
+name: Build PRO CAMERA STUDIO Apple UI - Android 11+
+
+on:
+  push:
+    branches:
+      - build/pro-camera-studio-apple-android11
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Reconstruct complete Android project archive
+        shell: bash
+        run: |
+          cat ProCameraStudioAppleArchive.part0 \
+              ProCameraStudioAppleArchive.part1 \
+              ProCameraStudioAppleArchive.part2 \
+              ProCameraStudioAppleArchive.part3 \
+              ProCameraStudioAppleArchive.part4 \
+              ProCameraStudioAppleArchive.part5 \
+              ProCameraStudioAppleArchive.part6 > project.tar.xz.b64
+          test "$(wc -c < project.tar.xz.b64)" -eq 24016
+          base64 --decode project.tar.xz.b64 > project.tar.xz
+          xz -t project.tar.xz
+          tar -xJf project.tar.xz
+          test -f ProCameraStudio/app/build.gradle.kts
+          test -f ProCameraStudio/app/src/main/java/com/procamera/studio/MainActivity.kt
+          grep -q 'minSdk = 30' ProCameraStudio/app/build.gradle.kts
+
+      - name: Prepare Android SDK
+        shell: bash
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > "$GITHUB_WORKSPACE/ProCameraStudio/local.properties"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list_installed
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        run: |
+          cd ProCameraStudio
+          gradle --no-daemon clean assembleDebug
+
+      - name: Verify Android 11+ APK
+        shell: bash
+        run: |
+          APK="ProCameraStudio/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          ls -lh "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | tee apk-badging.txt
+          grep -q "sdkVersion:'30'" apk-badging.txt
+          grep -q "targetSdkVersion:'35'" apk-badging.txt
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: pro-camera-studio-apple-android11-apk
+          path: ProCameraStudio/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
